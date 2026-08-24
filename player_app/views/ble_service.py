@@ -30,6 +30,7 @@ class MagicBoxieService(Service):
         self._http_port = http_port
         self._transcode_status_bytes = protocol.encode_transcode_status(None)
         self._poll_task: Optional[asyncio.Task] = None
+        self._library_bytes = b""
 
     def start_status_polling(self) -> None:
         self._poll_task = asyncio.create_task(self._poll_status_loop())
@@ -85,23 +86,34 @@ class MagicBoxieService(Service):
 
     @characteristic(protocol.LIBRARY_CHARACTERISTIC_UUID, CharFlags.READ)
     def library(self, options):
-        # Computed fresh on every read rather than cached at construction
-        # time - the library now scans concurrently with BLE startup (see
-        # _run_library_scan in main.py) instead of before it, so a cached
-        # snapshot taken at construction would be stuck empty forever once
-        # the scan finishes (no NOTIFY on this characteristic to push an
-        # update, and nothing to have called it anyway). Cheap enough
-        # (~10-30 short lines) to just recompute per read.
+        # Computed fresh at the start of every *logical* read rather than
+        # cached at construction time - the library now scans concurrently
+        # with BLE startup (see _run_library_scan in main.py) instead of
+        # before it, so a cached snapshot taken at construction would be
+        # stuck empty forever once the scan finishes (no NOTIFY on this
+        # characteristic to push an update, and nothing to have called it
+        # anyway).
         #
-        # options.offset must be honored here: bluez_peripheral's ReadValue
-        # returns whatever this getter returns as-is for every ATT read,
-        # including "long read" blob continuations (real libraries with
-        # real titles routinely exceed one MTU chunk) - it does not slice
-        # for us despite the offset being available. Returning the full
-        # value regardless of offset made every continuation read repeat
-        # from byte 0, corrupting the reassembled payload into something
-        # that fails to parse into any movies at all.
-        return protocol.encode_library(self._controller.movies)[options.offset :]
+        # "Start of every logical read", not "every call": a value this
+        # long doesn't arrive in one shot - BlueZ splits it into multiple
+        # ATT "Read Blob Request" calls here, one per options.offset, for
+        # the client to reassemble (options.offset must be honored for
+        # exactly this reason - returning the full value regardless of
+        # offset made every continuation read repeat from byte 0,
+        # corrupting the reassembly). Recomputing encode_library() fresh on
+        # *each* of those fragment calls re-opened the same class of bug at
+        # a smaller scale: the library can mutate between fragments (a
+        # home-sync download landing mid-reassembly, observed on real
+        # hardware), so two fragments of what's supposed to be one
+        # contiguous string could get sliced from two different snapshots -
+        # tearing the reassembled payload into something that fails to
+        # parse into any movies at all, even though the library is
+        # genuinely non-empty. offset == 0 always marks the start of a new
+        # logical read, so snapshot only there and reuse it for every
+        # subsequent fragment of that same read.
+        if options.offset == 0:
+            self._library_bytes = protocol.encode_library(self._controller.movies)
+        return self._library_bytes[options.offset :]
 
     @characteristic(protocol.NETWORK_INFO_CHARACTERISTIC_UUID, CharFlags.READ)
     def network_info(self, options):
