@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
 from .library import MovieLibrary
 
@@ -22,6 +22,20 @@ _CELL_WIDTH = _THUMBNAIL_MAX_SIZE[0] + _CELL_PADDING * 2
 _CELL_HEIGHT = _THUMBNAIL_MAX_SIZE[1] + _CAPTION_HEIGHT + _CELL_PADDING * 2
 _BACKGROUND = (0, 0, 0)
 _TEXT_COLOR = (220, 220, 220)
+_CAPTION_FONT_SIZE = 18
+# fonts-dejavu-core (installed by both the Dockerfile and `make pi-setup`) is
+# the only TrueType font guaranteed to be on the box. Without it, PIL falls
+# back to its own tiny unscaled bitmap font, which is illegible on an HDMI
+# display - hence the fallback below only kicks in for dev machines that
+# happen to be missing the package.
+_CAPTION_FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+
+
+def _load_caption_font() -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    try:
+        return ImageFont.truetype(_CAPTION_FONT_PATH, _CAPTION_FONT_SIZE)
+    except OSError:
+        return ImageFont.load_default()
 
 
 def render_idle_screen(library: MovieLibrary, output_path: Path = IDLE_SCREEN_PATH) -> Path:
@@ -34,6 +48,7 @@ def render_idle_screen(library: MovieLibrary, output_path: Path = IDLE_SCREEN_PA
     rows = max(1, -(-len(movies) // columns))  # ceil division
     canvas = Image.new("RGB", (columns * _CELL_WIDTH, rows * _CELL_HEIGHT), _BACKGROUND)
     draw = ImageDraw.Draw(canvas)
+    font = _load_caption_font()
 
     for index, movie in enumerate(movies):
         col, row = index % columns, index // columns
@@ -43,7 +58,7 @@ def render_idle_screen(library: MovieLibrary, output_path: Path = IDLE_SCREEN_PA
         if thumbnail_path is not None:
             _paste_thumbnail(canvas, thumbnail_path, cell_x, cell_y)
 
-        _draw_caption(draw, movie.title, cell_x, cell_y)
+        _draw_caption(draw, movie.title, cell_x, cell_y, font)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     canvas.save(output_path)
@@ -63,17 +78,17 @@ def _paste_thumbnail(canvas: Image.Image, thumbnail_path: Path, cell_x: int, cel
     canvas.paste(thumbnail, (paste_x, paste_y))
 
 
-def _draw_caption(draw: ImageDraw.ImageDraw, title: str, cell_x: int, cell_y: int) -> None:
-    caption = _truncate(title, draw)
-    text_x = cell_x + (_CELL_WIDTH - draw.textlength(caption)) / 2
+def _draw_caption(draw: ImageDraw.ImageDraw, title: str, cell_x: int, cell_y: int, font) -> None:
+    caption = _truncate(title, draw, font)
+    text_x = cell_x + (_CELL_WIDTH - draw.textlength(caption, font=font)) / 2
     text_y = cell_y + _CELL_PADDING + _THUMBNAIL_MAX_SIZE[1] + 6
-    draw.text((text_x, text_y), caption, fill=_TEXT_COLOR)
+    draw.text((text_x, text_y), caption, fill=_TEXT_COLOR, font=font)
 
 
-def _truncate(title: str, draw: ImageDraw.ImageDraw) -> str:
+def _truncate(title: str, draw: ImageDraw.ImageDraw, font) -> str:
     max_width = _CELL_WIDTH - _CELL_PADDING * 2
-    if draw.textlength(title) <= max_width:
+    if draw.textlength(title, font=font) <= max_width:
         return title
-    while title and draw.textlength(title + "…") > max_width:
+    while title and draw.textlength(title + "…", font=font) > max_width:
         title = title[:-1]
     return title + "…"

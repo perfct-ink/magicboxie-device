@@ -110,6 +110,7 @@ pi-setup:
 	sudo apt-get install -y --no-install-recommends \
 		python3-venv python3-dev build-essential \
 		mpv ffmpeg libjpeg-dev zlib1g-dev \
+		fonts-dejavu-core \
 		bluez dbus
 	sudo usermod -aG video,input,bluetooth "$$(whoami)"
 	python3 -m venv $(VENV)
