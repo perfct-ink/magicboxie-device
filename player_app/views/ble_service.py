@@ -15,6 +15,7 @@ from bluez_peripheral.gatt.service import Service
 from ..controllers.playback_controller import PlaybackController
 from ..models import protocol
 from ..models.protocol import PlaybackState
+from ..util import local_ip
 
 logger = logging.getLogger(__name__)
 
@@ -22,11 +23,11 @@ STATUS_POLL_INTERVAL_SECONDS = 1.0
 
 
 class MagicBoxieService(Service):
-    def __init__(self, controller: PlaybackController, network_url: str):
+    def __init__(self, controller: PlaybackController, http_port: int):
         super().__init__(protocol.SERVICE_UUID, True)
         self._controller = controller
         self._status_bytes = protocol.encode_status(PlaybackState.idle())
-        self._network_url_bytes = network_url.encode("utf-8")
+        self._http_port = http_port
         self._transcode_status_bytes = protocol.encode_transcode_status(None)
         self._poll_task: Optional[asyncio.Task] = None
 
@@ -104,7 +105,17 @@ class MagicBoxieService(Service):
 
     @characteristic(protocol.NETWORK_INFO_CHARACTERISTIC_UUID, CharFlags.READ)
     def network_info(self, options):
-        return self._network_url_bytes[options.offset :]
+        # Computed fresh on every read, like library() above and for the
+        # same reason: a value snapshotted once at construction time would
+        # go stale the moment the device's DHCP-assigned LAN IP changes
+        # without a full process restart (observed repeatedly on real
+        # hardware - a WiFi drop/reconnect can renew the lease to a new
+        # address while this daemon keeps running). A stale IP here
+        # silently strands the iOS app's HTTP client on a dead address
+        # forever, with BLE control still working fine - exactly the
+        # "connected but no movies" failure mode this was traced to.
+        url = f"http://{local_ip()}:{self._http_port}"
+        return url.encode("utf-8")[options.offset :]
 
     @characteristic(protocol.TRANSCODE_STATUS_CHARACTERISTIC_UUID, CharFlags.READ | CharFlags.NOTIFY)
     def transcode_status(self, options):

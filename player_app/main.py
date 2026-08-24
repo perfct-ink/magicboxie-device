@@ -281,8 +281,7 @@ async def _run_ble_once(controller: PlaybackController, stop_event: asyncio.Even
     from .models import protocol
     from .views.ble_service import MagicBoxieService
 
-    network_url = f"http://{local_ip()}:{HTTP_PORT}"
-    service = MagicBoxieService(controller, network_url)
+    service = MagicBoxieService(controller, HTTP_PORT)
 
     bus = await get_message_bus()
 
@@ -317,7 +316,7 @@ async def _run_ble_once(controller: PlaybackController, stop_event: asyncio.Even
             await _unregister_advertisement(adapter)
             advert = Advertisement("", [protocol.SERVICE_UUID], 0x0000, ADVERT_TIMEOUT_SECONDS)
             await advert.register(bus, adapter)
-            logger.info("Advertising %r (WiFi: %s)", DEVICE_NAME, network_url)
+            logger.info("Advertising %r (WiFi: http://%s:%d)", DEVICE_NAME, local_ip(), HTTP_PORT)
             await sleep_unless_stopped(stop_event, ADVERT_REFRESH_SECONDS)
     finally:
         await service.stop_status_polling()
