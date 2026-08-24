@@ -19,14 +19,13 @@ import asyncio
 import logging
 import os
 import signal
-import socket
 from pathlib import Path
 from typing import List
 
 from .controllers.playback_controller import PlaybackController
 from .models.library import MovieLibrary
 from .models.player import MpvController
-from .util import sleep_unless_stopped
+from .util import local_ip, sleep_unless_stopped
 
 logger = logging.getLogger(__name__)
 
@@ -72,19 +71,6 @@ def _mpv_output_args() -> List[str]:
     # Override with MAGICBOXIE_MPV_ARGS if your hardware needs a different --vo/--gpu-context.
     raw = os.environ.get("MAGICBOXIE_MPV_ARGS", "--vo=gpu --gpu-context=drm")
     return raw.split()
-
-
-def _local_ip() -> str:
-    """Best-effort LAN IP: opens a UDP "connection" (no packets sent) to a
-    public address just to see which local interface routing would use."""
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        sock.connect(("8.8.8.8", 80))
-        return sock.getsockname()[0]
-    except OSError:
-        return "127.0.0.1"
-    finally:
-        sock.close()
 
 
 async def _run() -> None:
@@ -158,7 +144,7 @@ async def _run_mdns(stop_event: asyncio.Event) -> None:
     from .views.mdns_service import MdnsAdvertiser
 
     while not stop_event.is_set():
-        advertiser = MdnsAdvertiser(DEVICE_NAME, _local_ip(), HTTP_PORT)
+        advertiser = MdnsAdvertiser(DEVICE_NAME, local_ip(), HTTP_PORT)
         try:
             await advertiser.start()
         except Exception:
@@ -295,7 +281,7 @@ async def _run_ble_once(controller: PlaybackController, stop_event: asyncio.Even
     from .models import protocol
     from .views.ble_service import MagicBoxieService
 
-    network_url = f"http://{_local_ip()}:{HTTP_PORT}"
+    network_url = f"http://{local_ip()}:{HTTP_PORT}"
     service = MagicBoxieService(controller, network_url)
 
     bus = await get_message_bus()
@@ -343,7 +329,10 @@ async def _run_home_sync(controller: PlaybackController, stop_event: asyncio.Eve
     expected and just gets logged - not treated as fatal."""
     from .views.home_sync_service import HomeServerSync
 
-    sync = HomeServerSync(controller.library, HOME_SERVER_URL, HOME_SERVER_PASSWORD)
+    def set_syncing_title(title: str | None) -> None:
+        controller.currently_syncing_movie_title = title
+
+    sync = HomeServerSync(controller.library, HOME_SERVER_URL, HOME_SERVER_PASSWORD, on_progress=set_syncing_title)
     while not stop_event.is_set():
         try:
             await sync.check_in()

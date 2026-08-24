@@ -30,6 +30,12 @@ class PlaybackController:
         # than a direct dependency between them, mirroring how is_idle
         # already works in the other direction (TranscodeService reads it).
         self.currently_transcoding_movie_id: Optional[int] = None
+        # Set/cleared by HomeServerSync, read by web_service.py's /api/status
+        # - same hub pattern as currently_transcoding_movie_id above. A
+        # title, not an id: the movie doesn't have a local id yet while
+        # it's still downloading (library._stable_id only ever runs against
+        # files that already exist on disk).
+        self.currently_syncing_movie_title: Optional[str] = None
         # Updated on every command (remote or local) - IdleDimService reads
         # this to know how long it's been since anything happened, so it
         # knows when to dim the idle screen. monotonic(), not wall-clock

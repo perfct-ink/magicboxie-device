@@ -182,3 +182,56 @@ def test_check_in_handles_unreachable_movies_list(tmp_path):
         asyncio.run(sync.check_in())
 
     assert library.movies == []
+
+
+def test_check_in_downloads_one_at_a_time_reporting_progress(tmp_path):
+    """The device only ever has one movie in flight at once - downloads are
+    large files over a slow link, and on_progress (which
+    main.py mirrors onto PlaybackController.currently_syncing_movie_title
+    for /api/status to report) only ever tracks a single title, so this is
+    both a behavioral guarantee and what makes that reporting meaningful."""
+    library = _library(tmp_path)
+    progress_calls = []
+    sync = HomeServerSync(library, BASE_URL, "secret", on_progress=progress_calls.append)
+
+    with aioresponses() as mocked:
+        mocked.post(f"{BASE_URL}/Users/AuthenticateByName", payload={"AccessToken": "tok123"}, repeat=True)
+        mocked.get(
+            f"{BASE_URL}/Users/1/Items?IncludeItemTypes=Movie&Recursive=true",
+            payload={
+                "Items": [
+                    {"Id": "1", "Name": "Alpha", "MagicBoxieOriginalFilename": "alpha.mp4", "MagicBoxieStatus": "ready"},
+                    {"Id": "2", "Name": "Beta", "MagicBoxieOriginalFilename": "beta.mp4", "MagicBoxieStatus": "ready"},
+                ],
+            },
+        )
+        mocked.get(f"{BASE_URL}/Videos/1/stream?static=true", body=b"alpha-bytes")
+        mocked.get(f"{BASE_URL}/Videos/2/stream?static=true", body=b"beta-bytes")
+
+        asyncio.run(sync.check_in())
+
+    # Alpha's whole in-flight window (start, then end) happens before Beta's
+    # starts - never both "in flight" (non-None) at once.
+    assert progress_calls == ["Alpha", None, "Beta", None]
+
+
+def test_check_in_clears_progress_even_when_a_download_fails(tmp_path):
+    library = _library(tmp_path)
+    progress_calls = []
+    sync = HomeServerSync(library, BASE_URL, "secret", on_progress=progress_calls.append)
+
+    with aioresponses() as mocked:
+        mocked.post(f"{BASE_URL}/Users/AuthenticateByName", payload={"AccessToken": "tok123"}, repeat=True)
+        mocked.get(
+            f"{BASE_URL}/Users/1/Items?IncludeItemTypes=Movie&Recursive=true",
+            payload={
+                "Items": [
+                    {"Id": "1", "Name": "Alpha", "MagicBoxieOriginalFilename": "alpha.mp4", "MagicBoxieStatus": "ready"},
+                ],
+            },
+        )
+        mocked.get(f"{BASE_URL}/Videos/1/stream?static=true", status=500)
+
+        asyncio.run(sync.check_in())
+
+    assert progress_calls == ["Alpha", None]

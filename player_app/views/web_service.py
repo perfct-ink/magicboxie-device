@@ -15,6 +15,7 @@ from aiohttp import web
 from ..controllers.playback_controller import PlaybackController
 from ..models.library import VIDEO_EXTENSIONS
 from ..models.protocol import API_VERSION, Command, Movie, Opcode
+from ..util import local_ip
 
 _METADATA_FIELDS = ("title", "description", "year", "duration_seconds")
 
@@ -232,11 +233,12 @@ async def _get_status(request: web.Request) -> web.Response:
         "status": state.status.name.lower(),
         "movie_id": state.movie_id,
         "position_seconds": state.position_seconds,
+        "syncing_movie_title": controller.currently_syncing_movie_title,
     })
 
 
 async def _get_version(request: web.Request) -> web.Response:
-    return web.json_response({"api_version": API_VERSION})
+    return web.json_response({"api_version": API_VERSION, "ip_address": local_ip()})
 
 
 async def _post_command(request: web.Request) -> web.Response:

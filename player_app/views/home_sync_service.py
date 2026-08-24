@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import List
+from typing import Callable, List, Optional
 
 import aiohttp
 
@@ -35,11 +35,23 @@ _TICKS_PER_SECOND = 10_000_000  # Jellyfin's RunTimeTicks unit is 100ns
 
 
 class HomeServerSync:
-    def __init__(self, library: MovieLibrary, base_url: str, password: str):
+    def __init__(
+        self,
+        library: MovieLibrary,
+        base_url: str,
+        password: str,
+        on_progress: Optional[Callable[[Optional[str]], None]] = None,
+    ):
         self._library = library
         self._base_url = base_url.rstrip("/")
         self._password = password
         self._device_id = self._read_device_identifier()
+        # Called with a movie's title when its download starts and None
+        # when it ends (success, failure, or exception alike) - lets
+        # main.py mirror "what's downloading right now" onto
+        # PlaybackController for web_service.py's /api/status to report,
+        # without this class needing to know PlaybackController exists.
+        self._on_progress = on_progress or (lambda _title: None)
 
     async def check_in(self) -> None:
         async with aiohttp.ClientSession() as session:
@@ -71,9 +83,19 @@ class HomeServerSync:
             headers = {"Authorization": f"Bearer {token}"}
 
             logger.info("Home server check-in: downloading %d new movie(s)", len(to_download))
-            downloaded = [
-                movie for movie in to_download if await self._download_movie(session, movie, headers)
-            ]
+            # One at a time, deliberately: these are large files over a slow
+            # WiFi/USB-tethered link, and _on_progress only ever tracks a
+            # single in-flight title - downloading several concurrently
+            # would also just contend with each other for the same
+            # bandwidth with nothing gained.
+            downloaded = []
+            for movie in to_download:
+                self._on_progress(movie["Name"])
+                try:
+                    if await self._download_movie(session, movie, headers):
+                        downloaded.append(movie)
+                finally:
+                    self._on_progress(None)
             if not downloaded:
                 return
 

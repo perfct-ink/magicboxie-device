@@ -62,7 +62,10 @@ def test_get_version():
             await client.close()
 
     data = asyncio.run(scenario())
-    assert data == {"api_version": protocol.API_VERSION}
+    assert data["api_version"] == protocol.API_VERSION
+    # Best-effort LAN IP - not asserting an exact value (depends on the
+    # test host's own network config), just that it's a plausible one.
+    assert data["ip_address"].count(".") == 3
 
 
 def test_post_command_select_and_play_reflected_in_status():
@@ -79,6 +82,20 @@ def test_post_command_select_and_play_reflected_in_status():
     data = asyncio.run(scenario())
     assert data["status"] == "playing"
     assert data["movie_id"] == 1
+
+
+def test_status_reports_currently_syncing_movie_title():
+    async def scenario():
+        client, controller = await _make_client()
+        try:
+            controller.currently_syncing_movie_title = "Some Movie"
+            resp = await client.get("/api/status")
+            return await resp.json()
+        finally:
+            await client.close()
+
+    data = asyncio.run(scenario())
+    assert data["syncing_movie_title"] == "Some Movie"
 
 
 def test_post_command_unknown_opcode_returns_400():
