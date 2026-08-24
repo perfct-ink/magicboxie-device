@@ -14,8 +14,14 @@ from .library import MovieLibrary
 
 IDLE_SCREEN_PATH = Path("/tmp/magicboxie-idle-screen.png")
 
-_COLUMNS = 4
-_THUMBNAIL_MAX_SIZE = (260, 180)
+_COLUMNS = 6
+# 6 columns * 320px cells = 1920px wide, matching a real HD display's width
+# exactly - the canvas used to size itself to content alone (4 columns of
+# 300px cells = 1200px), which mpv then had to upscale ~1.6x to fill a real
+# screen, blurring the whole grid. Height still grows with row count (no
+# reason to pad it out to a fixed 1080/1200 - mpv letterboxes the
+# difference instead of stretching, which stays crisp).
+_THUMBNAIL_MAX_SIZE = (280, 200)
 _CAPTION_HEIGHT = 28
 _CELL_PADDING = 20
 _CELL_WIDTH = _THUMBNAIL_MAX_SIZE[0] + _CELL_PADDING * 2
