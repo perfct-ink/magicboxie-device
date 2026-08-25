@@ -15,7 +15,7 @@ from aiohttp import web
 from ..controllers.playback_controller import PlaybackController
 from ..models.library import VIDEO_EXTENSIONS
 from ..models.protocol import API_VERSION, Command, Movie, Opcode
-from ..util import local_ip
+from ..util import cpu_temperature_celsius, get_throttle_status, local_ip
 
 _METADATA_FIELDS = ("title", "description", "year", "duration_seconds")
 
@@ -229,11 +229,15 @@ async def _post_metadata(request: web.Request) -> web.Response:
 async def _get_status(request: web.Request) -> web.Response:
     controller = request.app[_CONTROLLER_KEY]
     state = await controller.refresh_status()
+    throttle = await get_throttle_status()
     return web.json_response({
         "status": state.status.name.lower(),
         "movie_id": state.movie_id,
         "position_seconds": state.position_seconds,
         "syncing_movie_title": controller.currently_syncing_movie_title,
+        "cpu_temperature_celsius": cpu_temperature_celsius(),
+        "under_voltage": throttle.under_voltage if throttle else None,
+        "throttled": throttle.throttled if throttle else None,
     })
 
 

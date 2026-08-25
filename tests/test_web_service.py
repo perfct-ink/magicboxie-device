@@ -1,4 +1,5 @@
 import asyncio
+from unittest.mock import AsyncMock, patch
 
 from aiohttp.test_utils import TestClient, TestServer
 from fakes import FakeLibrary, FakeMpv
@@ -6,6 +7,7 @@ from fakes import FakeLibrary, FakeMpv
 from player_app.controllers.playback_controller import PlaybackController
 from player_app.models import protocol
 from player_app.models.library import MovieLibrary
+from player_app.util import ThrottleStatus
 from player_app.views.web_service import create_app
 
 
@@ -96,6 +98,72 @@ def test_status_reports_currently_syncing_movie_title():
 
     data = asyncio.run(scenario())
     assert data["syncing_movie_title"] == "Some Movie"
+
+
+def test_status_reports_cpu_temperature():
+    async def scenario():
+        client, _ = await _make_client()
+        try:
+            with patch("player_app.views.web_service.cpu_temperature_celsius", return_value=48.3):
+                resp = await client.get("/api/status")
+                return await resp.json()
+        finally:
+            await client.close()
+
+    data = asyncio.run(scenario())
+    assert data["cpu_temperature_celsius"] == 48.3
+
+
+def test_status_reports_null_temperature_when_sensor_unavailable():
+    """The Docker dev container this test suite runs in has no real
+    thermal zone - cpu_temperature_celsius() already handles that
+    gracefully (see its own test), and this just confirms the endpoint
+    doesn't choke on a None."""
+    async def scenario():
+        client, _ = await _make_client()
+        try:
+            resp = await client.get("/api/status")
+            return await resp.json()
+        finally:
+            await client.close()
+
+    data = asyncio.run(scenario())
+    assert data["cpu_temperature_celsius"] is None
+
+
+def test_status_reports_throttle_flags():
+    async def scenario():
+        client, _ = await _make_client()
+        try:
+            with patch(
+                "player_app.views.web_service.get_throttle_status",
+                new=AsyncMock(return_value=ThrottleStatus(under_voltage=True, throttled=False)),
+            ):
+                resp = await client.get("/api/status")
+                return await resp.json()
+        finally:
+            await client.close()
+
+    data = asyncio.run(scenario())
+    assert data["under_voltage"] is True
+    assert data["throttled"] is False
+
+
+def test_status_reports_null_throttle_flags_when_vcgencmd_unavailable():
+    """The Docker dev container this test suite runs in has no vcgencmd -
+    get_throttle_status() already handles that gracefully (see its own
+    test), and this just confirms the endpoint doesn't choke on a None."""
+    async def scenario():
+        client, _ = await _make_client()
+        try:
+            resp = await client.get("/api/status")
+            return await resp.json()
+        finally:
+            await client.close()
+
+    data = asyncio.run(scenario())
+    assert data["under_voltage"] is None
+    assert data["throttled"] is None
 
 
 def test_post_command_unknown_opcode_returns_400():

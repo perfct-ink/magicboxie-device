@@ -4,6 +4,18 @@ from __future__ import annotations
 
 import asyncio
 import socket
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Optional
+
+_THERMAL_ZONE_PATH = Path("/sys/class/thermal/thermal_zone0/temp")
+# vcgencmd get_throttled's bitmask - see Raspberry Pi's own documentation.
+# Only the two "right now" bits are surfaced (not e.g. bit 1/frequency-
+# capped, or the "has happened since boot" bits 16-19) - under-voltage and
+# active throttling are the two that actually mean "something's wrong with
+# this device at this moment," which is what a live status display needs.
+_UNDER_VOLTAGE_NOW_BIT = 0x1
+_THROTTLED_NOW_BIT = 0x4
 
 
 async def sleep_unless_stopped(stop_event: asyncio.Event, seconds: float) -> None:
@@ -30,3 +42,57 @@ def local_ip() -> str:
         return "127.0.0.1"
     finally:
         sock.close()
+
+
+def cpu_temperature_celsius() -> Optional[float]:
+    """Reads the SoC's own thermal sensor - the same value `vcgencmd
+    measure_temp` reports, but as a plain world-readable sysfs file rather
+    than a subprocess call that needs the `video` group. Millidegrees C as
+    a plain integer (e.g. "48312" -> 48.312). None if the file isn't there
+    at all (e.g. running in the Docker dev container, which has no real
+    thermal zone) or its contents aren't parseable - a missing sensor
+    reading shouldn't take the whole status endpoint down with it."""
+    try:
+        return int(_THERMAL_ZONE_PATH.read_text().strip()) / 1000.0
+    except (OSError, ValueError):
+        return None
+
+
+@dataclass
+class ThrottleStatus:
+    under_voltage: bool
+    throttled: bool
+
+
+async def get_throttle_status() -> Optional[ThrottleStatus]:
+    """Runs `vcgencmd get_throttled` - the project's own prior suspicion
+    (a Pi Zero W repeatedly going unreachable under load) was an
+    undervoltage/power-supply issue, and this is the actual, authoritative
+    way to confirm that rather than guess from symptoms. None if vcgencmd
+    isn't available at all (not real Pi hardware, e.g. the Docker dev
+    container) or its output isn't in the expected "throttled=0x..."
+    form - same graceful-degradation contract as cpu_temperature_celsius."""
+    try:
+        process = await asyncio.create_subprocess_exec(
+            "vcgencmd", "get_throttled",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _ = await process.communicate()
+    except OSError:
+        return None
+    if process.returncode != 0:
+        return None
+
+    text = stdout.decode(errors="replace").strip()
+    if not text.startswith("throttled=0x"):
+        return None
+    try:
+        value = int(text.removeprefix("throttled="), 16)
+    except ValueError:
+        return None
+
+    return ThrottleStatus(
+        under_voltage=bool(value & _UNDER_VOLTAGE_NOW_BIT),
+        throttled=bool(value & _THROTTLED_NOW_BIT),
+    )
