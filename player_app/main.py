@@ -330,8 +330,25 @@ async def _run_home_sync(controller: PlaybackController, stop_event: asyncio.Eve
 
     def set_syncing_title(title: str | None) -> None:
         controller.currently_syncing_movie_title = title
+        # Refreshes the on-screen sync badge (see idle_screen.py) the
+        # instant a download starts/finishes, rather than waiting for the
+        # idle screen to happen to be redrawn for some unrelated reason.
+        # Guarded on is_idle: HomeServerSync itself won't be downloading
+        # anything while something's playing (see is_idle= below), but this
+        # callback fires with title=None on every download's `finally`
+        # regardless of why it ended - showing the idle screen here without
+        # the guard could otherwise stomp on a movie that's actually on
+        # screen right now.
+        if controller.is_idle:
+            asyncio.create_task(controller.show_idle_screen())
 
-    sync = HomeServerSync(controller.library, HOME_SERVER_URL, HOME_SERVER_PASSWORD, on_progress=set_syncing_title)
+    sync = HomeServerSync(
+        controller.library,
+        HOME_SERVER_URL,
+        HOME_SERVER_PASSWORD,
+        on_progress=set_syncing_title,
+        is_idle=lambda: controller.is_idle,
+    )
     while not stop_event.is_set():
         try:
             await sync.check_in()

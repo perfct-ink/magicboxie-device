@@ -235,3 +235,114 @@ def test_check_in_clears_progress_even_when_a_download_fails(tmp_path):
         asyncio.run(sync.check_in())
 
     assert progress_calls == ["Alpha", None]
+
+
+def test_check_in_does_nothing_while_playback_is_active(tmp_path):
+    """No HTTP calls at all while something's playing, not even to list
+    what's available - a device with only one core shouldn't spend any of
+    it (network stack, disk I/O for a download, or the ffprobe/ffmpeg calls
+    in the library.scan() a download would trigger) competing with
+    decode."""
+    library = _library(tmp_path)
+    sync = HomeServerSync(library, BASE_URL, "secret", is_idle=lambda: False)
+
+    with aioresponses() as mocked:
+        # No mocks registered at all - any HTTP call at all fails the test.
+        asyncio.run(sync.check_in())
+
+    assert library.movies == []
+
+
+def test_check_in_stops_starting_new_downloads_once_playback_begins(tmp_path):
+    """Playback starting partway through a check-in lets whatever's already
+    downloading finish (an aborted large download over a slow link is pure
+    waste) but must not start the next one."""
+    library = _library(tmp_path)
+    idle = [True]
+    sync = HomeServerSync(library, BASE_URL, "secret", is_idle=lambda: idle[0])
+
+    def stop_being_idle_after_alpha(title):
+        if title is None:
+            idle[0] = False
+
+    with aioresponses() as mocked:
+        mocked.post(f"{BASE_URL}/Users/AuthenticateByName", payload={"AccessToken": "tok123"}, repeat=True)
+        mocked.get(
+            f"{BASE_URL}/Users/1/Items?IncludeItemTypes=Movie&Recursive=true",
+            payload={
+                "Items": [
+                    {"Id": "1", "Name": "Alpha", "MagicBoxieOriginalFilename": "alpha.mp4", "MagicBoxieStatus": "ready"},
+                    {"Id": "2", "Name": "Beta", "MagicBoxieOriginalFilename": "beta.mp4", "MagicBoxieStatus": "ready"},
+                ],
+            },
+        )
+        mocked.get(f"{BASE_URL}/Videos/1/stream?static=true", body=b"alpha-bytes")
+        # No /Videos/2/stream mock - if Beta's download is attempted anyway,
+        # aioresponses raises for the unmatched request and the test fails.
+
+        sync._on_progress = stop_being_idle_after_alpha
+        asyncio.run(sync.check_in())
+
+    assert (tmp_path / "movies" / "Alpha.mp4").exists()
+    assert not (tmp_path / "movies" / "Beta.mp4").exists()
+
+
+def test_check_in_defers_scan_and_metadata_when_playback_starts_mid_cycle(tmp_path):
+    """Alpha finishes downloading right as playback starts (before this
+    cycle reaches library.scan()) - the file must stay on disk and its
+    metadata must not be lost, just deferred to a later, idle check-in."""
+    library = _library(tmp_path)
+    idle = [True]
+    sync = HomeServerSync(library, BASE_URL, "secret", is_idle=lambda: idle[0])
+
+    with aioresponses() as mocked:
+        mocked.post(f"{BASE_URL}/Users/AuthenticateByName", payload={"AccessToken": "tok123"}, repeat=True)
+        mocked.get(
+            f"{BASE_URL}/Users/1/Items?IncludeItemTypes=Movie&Recursive=true",
+            payload={
+                "Items": [
+                    {
+                        "Id": "1",
+                        "Name": "Alpha",
+                        "Overview": "A movie.",
+                        "ProductionYear": 1999,
+                        "RunTimeTicks": 1234000000,
+                        "MagicBoxieOriginalFilename": "alpha.mkv",
+                        "MagicBoxieStatus": "ready",
+                    },
+                ],
+            },
+            repeat=True,
+        )
+        mocked.get(f"{BASE_URL}/Videos/1/stream?static=true", body=b"alpha-bytes")
+
+        # Flips right as Alpha's download finishes (on_progress(None)),
+        # still inside this same check_in() call - i.e. after the download
+        # but before the library.scan() step at the end. Only for this one
+        # call - the second check_in() below re-fires on_progress for the
+        # same (already-downloaded, no-op) movie, and must not re-trigger this.
+        def stop_being_idle_once(title):
+            if title is None:
+                idle[0] = False
+
+        sync._on_progress = stop_being_idle_once
+        asyncio.run(sync.check_in())
+
+        # Still on disk but not yet scanned into the library - deferred, not lost.
+        assert (tmp_path / "movies" / "Alpha.mkv").exists()
+        assert library.movies == []
+
+        # Playback ends; the next check-in picks up the deferred scan/metadata.
+        sync._on_progress = lambda _title: None
+        idle[0] = True
+        asyncio.run(sync.check_in())
+
+    titles = [m.title for m in library.movies]
+    assert titles == ["Alpha"]
+    movie = library.movies[0]
+    assert library.metadata_for(movie.id) == {
+        "title": "Alpha",
+        "description": "A movie.",
+        "year": 1999,
+        "duration_seconds": 123,
+    }

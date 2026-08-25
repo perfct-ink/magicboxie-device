@@ -101,8 +101,11 @@ class PlaybackController:
     async def show_idle_screen(self) -> None:
         """Displays the thumbnail-grid home screen - the device's resting
         state whenever nothing is selected to play (at startup, and after
-        stop_and_show_idle_screen())."""
-        image_path = render_idle_screen(self.library)
+        stop_and_show_idle_screen()). Also the live "syncing" badge's only
+        home: it's drawn into this same image (see idle_screen.py) since
+        mpv can only ever show one static file at a time, not a separate
+        overlay layer on top of it."""
+        image_path = render_idle_screen(self.library, syncing=self.currently_syncing_movie_title is not None)
         await self.player.show_image(image_path)
 
     async def stop_and_show_idle_screen(self) -> None:

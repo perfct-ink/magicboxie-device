@@ -41,6 +41,7 @@ class HomeServerSync:
         base_url: str,
         password: str,
         on_progress: Optional[Callable[[Optional[str]], None]] = None,
+        is_idle: Callable[[], bool] = lambda: True,
     ):
         self._library = library
         self._base_url = base_url.rstrip("/")
@@ -52,8 +53,28 @@ class HomeServerSync:
         # PlaybackController for web_service.py's /api/status to report,
         # without this class needing to know PlaybackController exists.
         self._on_progress = on_progress or (lambda _title: None)
+        # Same hub pattern as on_progress above - checked before starting a
+        # check-in at all (see check_in()) so this never competes with
+        # playback decode for network/disk I/O or (via the library.scan()
+        # at the end) CPU, on a device with only one core to share between
+        # them. Movies already downloaded are never abandoned mid-file for
+        # this - see the _pending_metadata handling below for what happens
+        # if playback starts partway through a cycle instead of before one.
+        self._is_idle = is_idle
+        # Movies downloaded in an earlier check-in whose library.scan() (and
+        # metadata save) got deferred because playback started before this
+        # cycle reached that point - retried on a later, idle cycle rather
+        # than dropped, so a movie that finished downloading right as
+        # someone hit play doesn't end up stuck unscanned (visible in
+        # `movies` with no duration/artwork) or missing its title/year/
+        # description from the home server indefinitely.
+        self._pending_metadata: List[dict] = []
 
     async def check_in(self) -> None:
+        if not self._is_idle():
+            logger.info("Home server check-in: skipped while playback is active")
+            return
+
         async with aiohttp.ClientSession() as session:
             try:
                 remote_movies = await self._register_and_list_movies(session)
@@ -63,45 +84,56 @@ class HomeServerSync:
 
             existing_titles = {movie.title for movie in self._library.movies}
             to_download = [m for m in remote_movies if m["Name"] not in existing_titles]
-            if not to_download:
-                logger.info("Home server check-in: nothing new")
+            if to_download:
+                # /devices/register (the common path above) lists movies
+                # without authenticating, but the video bytes themselves are
+                # served from an authenticated route - unlike the metadata-
+                # only registration listing, anonymous access to stream
+                # arbitrary video would be a real information-disclosure
+                # concern. A token is needed here regardless of which path
+                # found the movies to download.
+                token = await self._authenticate(session)
+                if token is None:
+                    logger.info(
+                        "Home server check-in: found %d new movie(s) but couldn't authenticate to download them",
+                        len(to_download),
+                    )
+                else:
+                    headers = {"Authorization": f"Bearer {token}"}
+                    logger.info("Home server check-in: downloading %d new movie(s)", len(to_download))
+                    # One at a time, deliberately: these are large files over
+                    # a slow WiFi/USB-tethered link, and _on_progress only
+                    # ever tracks a single in-flight title - downloading
+                    # several concurrently would also just contend with each
+                    # other for the same bandwidth with nothing gained.
+                    for movie in to_download:
+                        if not self._is_idle():
+                            # Playback started partway through this cycle -
+                            # let whatever's already mid-download finish
+                            # (an aborted large download over a slow link is
+                            # pure waste) but don't start any more.
+                            logger.info("Home server check-in: pausing further downloads - playback started")
+                            break
+                        self._on_progress(movie["Name"])
+                        try:
+                            if await self._download_movie(session, movie, headers):
+                                self._pending_metadata.append(movie)
+                        finally:
+                            self._on_progress(None)
+
+            if not self._pending_metadata:
+                if not to_download:
+                    logger.info("Home server check-in: nothing new")
                 return
 
-            # /devices/register (the common path above) lists movies without
-            # authenticating, but the video bytes themselves are served from
-            # an authenticated route - unlike the metadata-only registration
-            # listing, anonymous access to stream arbitrary video would be a
-            # real information-disclosure concern. A token is needed here
-            # regardless of which path found the movies to download.
-            token = await self._authenticate(session)
-            if token is None:
-                logger.info(
-                    "Home server check-in: found %d new movie(s) but couldn't authenticate to download them",
-                    len(to_download),
-                )
-                return
-            headers = {"Authorization": f"Bearer {token}"}
-
-            logger.info("Home server check-in: downloading %d new movie(s)", len(to_download))
-            # One at a time, deliberately: these are large files over a slow
-            # WiFi/USB-tethered link, and _on_progress only ever tracks a
-            # single in-flight title - downloading several concurrently
-            # would also just contend with each other for the same
-            # bandwidth with nothing gained.
-            downloaded = []
-            for movie in to_download:
-                self._on_progress(movie["Name"])
-                try:
-                    if await self._download_movie(session, movie, headers):
-                        downloaded.append(movie)
-                finally:
-                    self._on_progress(None)
-            if not downloaded:
+            if not self._is_idle():
+                logger.info("Home server check-in: deferring library scan until playback stops")
                 return
 
             self._library.scan()
-            for remote_movie in downloaded:
+            for remote_movie in self._pending_metadata:
                 self._save_metadata(remote_movie)
+            self._pending_metadata = []
 
     async def _register_and_list_movies(self, session: aiohttp.ClientSession) -> List[dict]:
         try:

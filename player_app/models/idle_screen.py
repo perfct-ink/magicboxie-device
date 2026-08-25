@@ -36,6 +36,24 @@ _CAPTION_FONT_SIZE = 18
 # happen to be missing the package.
 _CAPTION_FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 
+# Bottom-right "syncing" badge - mirrors the iOS app's own floating sync
+# indicator (see ContentView.SyncIndicator) so the same "something's
+# downloading from the home server right now" state is visible on the TV
+# too, not just the phone. Plain drawn shapes + ASCII text rather than a
+# Unicode glyph (e.g. a refresh-arrow symbol): DejaVu Sans's exact symbol
+# coverage isn't guaranteed, and a missing glyph renders as a "tofu" box -
+# not worth the risk on a screen this was already once mistaken for a font
+# bug (see the idle-screen resolution fix elsewhere in this file's git
+# history). A static PNG can't actually spin either way.
+_SYNC_BADGE_MARGIN = 24
+_SYNC_BADGE_HEIGHT = 44
+_SYNC_BADGE_PADDING_X = 18
+_SYNC_BADGE_COLOR = (24, 24, 24)
+_SYNC_DOT_COLOR = (245, 197, 66)
+_SYNC_LABEL = "Syncing"
+_SYNC_LABEL_COLOR = (230, 230, 230)
+_SYNC_LABEL_FONT_SIZE = 20
+
 
 def _load_caption_font() -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     try:
@@ -44,7 +62,14 @@ def _load_caption_font() -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
         return ImageFont.load_default()
 
 
-def render_idle_screen(library: MovieLibrary, output_path: Path = IDLE_SCREEN_PATH) -> Path:
+def _load_sync_badge_font() -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    try:
+        return ImageFont.truetype(_CAPTION_FONT_PATH, _SYNC_LABEL_FONT_SIZE)
+    except OSError:
+        return ImageFont.load_default()
+
+
+def render_idle_screen(library: MovieLibrary, output_path: Path = IDLE_SCREEN_PATH, syncing: bool = False) -> Path:
     """(Re)builds the grid from the library's current movies/thumbnails.
     Cheap enough - a handful of small images composited together - to just
     regenerate on demand each time it's shown rather than caching and
@@ -66,9 +91,34 @@ def render_idle_screen(library: MovieLibrary, output_path: Path = IDLE_SCREEN_PA
 
         _draw_caption(draw, movie.title, cell_x, cell_y, font)
 
+    if syncing:
+        _draw_sync_badge(canvas, draw)
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
     canvas.save(output_path)
     return output_path
+
+
+def _draw_sync_badge(canvas: Image.Image, draw: ImageDraw.ImageDraw) -> None:
+    font = _load_sync_badge_font()
+    text_width = draw.textlength(_SYNC_LABEL, font=font)
+    dot_diameter = 14
+    badge_width = int(_SYNC_BADGE_PADDING_X * 2 + dot_diameter + 10 + text_width)
+
+    x1 = canvas.width - _SYNC_BADGE_MARGIN
+    y1 = canvas.height - _SYNC_BADGE_MARGIN
+    x0 = x1 - badge_width
+    y0 = y1 - _SYNC_BADGE_HEIGHT
+    draw.rounded_rectangle((x0, y0, x1, y1), radius=_SYNC_BADGE_HEIGHT // 2, fill=_SYNC_BADGE_COLOR)
+
+    dot_cx = x0 + _SYNC_BADGE_PADDING_X + dot_diameter // 2
+    dot_cy = (y0 + y1) // 2
+    dot_r = dot_diameter // 2
+    draw.ellipse((dot_cx - dot_r, dot_cy - dot_r, dot_cx + dot_r, dot_cy + dot_r), fill=_SYNC_DOT_COLOR)
+
+    text_x = dot_cx + dot_r + 10
+    text_y = (y0 + y1) // 2 - _SYNC_LABEL_FONT_SIZE // 2 - 2
+    draw.text((text_x, text_y), _SYNC_LABEL, fill=_SYNC_LABEL_COLOR, font=font)
 
 
 def _paste_thumbnail(canvas: Image.Image, thumbnail_path: Path, cell_x: int, cell_y: int) -> None:
