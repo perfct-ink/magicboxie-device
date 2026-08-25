@@ -31,27 +31,26 @@ def test_render_idle_screen_with_no_movies_does_not_crash(tmp_path):
     assert output_path.exists()
 
 
-def test_render_idle_screen_draws_sync_badge_pixels_only_when_syncing(tmp_path):
+def test_render_idle_screen_draws_sync_badge_only_when_a_title_is_given(tmp_path):
     """Doesn't assert on exact badge geometry (that's an implementation
-    detail) - just that syncing=True visibly changes the bottom strip of
-    the image (the accent-colored dot) and syncing=False (the default)
-    doesn't, which is the only contract callers actually rely on. A full-
-    width strip rather than a tight corner crop, since the badge (dot +
-    "Syncing" text + padding) is wider than a small corner region."""
+    detail) - just that passing a syncing_title visibly changes the
+    top-left corner of the image (the accent-colored dot) and omitting it
+    (the default) doesn't, which is the only contract callers actually
+    rely on."""
     library = FakeLibrary()
 
-    def bottom_strip_colors(path):
+    def top_left_colors(path):
         with Image.open(path) as image:
-            strip = image.convert("RGB").crop((0, image.height - 60, image.width, image.height))
-            return strip.getcolors(maxcolors=1_000_000)
+            corner = image.convert("RGB").crop((0, 0, 400, 60))
+            return corner.getcolors(maxcolors=1_000_000)
 
     without_badge = tmp_path / "idle-no-sync.png"
     render_idle_screen(library, output_path=without_badge)
-    colors_without = bottom_strip_colors(without_badge)
+    colors_without = top_left_colors(without_badge)
 
     with_badge = tmp_path / "idle-sync.png"
-    render_idle_screen(library, output_path=with_badge, syncing=True)
-    colors_with = bottom_strip_colors(with_badge)
+    render_idle_screen(library, output_path=with_badge, syncing_title="Alpha")
+    colors_with = top_left_colors(with_badge)
 
     assert colors_without != colors_with
     # The badge's accent dot - confirms something was actually drawn there,

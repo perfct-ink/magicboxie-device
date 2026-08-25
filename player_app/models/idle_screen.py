@@ -36,23 +36,25 @@ _CAPTION_FONT_SIZE = 18
 # happen to be missing the package.
 _CAPTION_FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 
-# Bottom-right "syncing" badge - mirrors the iOS app's own floating sync
-# indicator (see ContentView.SyncIndicator) so the same "something's
-# downloading from the home server right now" state is visible on the TV
-# too, not just the phone. Plain drawn shapes + ASCII text rather than a
-# Unicode glyph (e.g. a refresh-arrow symbol): DejaVu Sans's exact symbol
-# coverage isn't guaranteed, and a missing glyph renders as a "tofu" box -
-# not worth the risk on a screen this was already once mistaken for a font
-# bug (see the idle-screen resolution fix elsewhere in this file's git
-# history). A static PNG can't actually spin either way.
-_SYNC_BADGE_MARGIN = 24
-_SYNC_BADGE_HEIGHT = 44
-_SYNC_BADGE_PADDING_X = 18
+# Small top-left "syncing" badge, next to what's actually downloading -
+# mirrors the iOS app's own floating sync indicator (see
+# ContentView.SyncIndicator) so the same "something's downloading from the
+# home server right now" state is visible on the TV too, not just the
+# phone. Plain drawn shapes + ASCII text rather than a Unicode glyph (e.g.
+# a refresh-arrow symbol): DejaVu Sans's exact symbol coverage isn't
+# guaranteed, and a missing glyph renders as a "tofu" box - not worth the
+# risk on a screen this was already once mistaken for a font bug (see the
+# idle-screen resolution fix elsewhere in this file's git history). A
+# static PNG can't actually spin either way.
+_SYNC_BADGE_MARGIN = 16
+_SYNC_BADGE_HEIGHT = 32
+_SYNC_BADGE_PADDING_X = 12
 _SYNC_BADGE_COLOR = (24, 24, 24)
 _SYNC_DOT_COLOR = (245, 197, 66)
-_SYNC_LABEL = "Syncing"
 _SYNC_LABEL_COLOR = (230, 230, 230)
-_SYNC_LABEL_FONT_SIZE = 20
+_SYNC_LABEL_FONT_SIZE = 15
+_SYNC_LABEL_MAX_WIDTH = 360
+_SYNC_DOT_DIAMETER = 10
 
 
 def _load_caption_font() -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
@@ -69,7 +71,9 @@ def _load_sync_badge_font() -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
         return ImageFont.load_default()
 
 
-def render_idle_screen(library: MovieLibrary, output_path: Path = IDLE_SCREEN_PATH, syncing: bool = False) -> Path:
+def render_idle_screen(
+    library: MovieLibrary, output_path: Path = IDLE_SCREEN_PATH, syncing_title: str | None = None
+) -> Path:
     """(Re)builds the grid from the library's current movies/thumbnails.
     Cheap enough - a handful of small images composited together - to just
     regenerate on demand each time it's shown rather than caching and
@@ -91,34 +95,38 @@ def render_idle_screen(library: MovieLibrary, output_path: Path = IDLE_SCREEN_PA
 
         _draw_caption(draw, movie.title, cell_x, cell_y, font)
 
-    if syncing:
-        _draw_sync_badge(canvas, draw)
+    if syncing_title:
+        _draw_sync_badge(canvas, draw, syncing_title)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     canvas.save(output_path)
     return output_path
 
 
-def _draw_sync_badge(canvas: Image.Image, draw: ImageDraw.ImageDraw) -> None:
+def _draw_sync_badge(canvas: Image.Image, draw: ImageDraw.ImageDraw, title: str) -> None:
+    """Small pill in the top-left corner, right next to the title of
+    whatever's actually downloading - not a generic "Syncing" label
+    divorced from what it's for, and not competing with the movie grid's
+    own bottom-right-leaning reading flow."""
     font = _load_sync_badge_font()
-    text_width = draw.textlength(_SYNC_LABEL, font=font)
-    dot_diameter = 14
-    badge_width = int(_SYNC_BADGE_PADDING_X * 2 + dot_diameter + 10 + text_width)
+    label = _truncate_to_width(title, draw, font, _SYNC_LABEL_MAX_WIDTH)
+    text_width = draw.textlength(label, font=font)
+    badge_width = int(_SYNC_BADGE_PADDING_X * 2 + _SYNC_DOT_DIAMETER + 8 + text_width)
 
-    x1 = canvas.width - _SYNC_BADGE_MARGIN
-    y1 = canvas.height - _SYNC_BADGE_MARGIN
-    x0 = x1 - badge_width
-    y0 = y1 - _SYNC_BADGE_HEIGHT
+    x0 = _SYNC_BADGE_MARGIN
+    y0 = _SYNC_BADGE_MARGIN
+    x1 = x0 + badge_width
+    y1 = y0 + _SYNC_BADGE_HEIGHT
     draw.rounded_rectangle((x0, y0, x1, y1), radius=_SYNC_BADGE_HEIGHT // 2, fill=_SYNC_BADGE_COLOR)
 
-    dot_cx = x0 + _SYNC_BADGE_PADDING_X + dot_diameter // 2
+    dot_cx = x0 + _SYNC_BADGE_PADDING_X + _SYNC_DOT_DIAMETER // 2
     dot_cy = (y0 + y1) // 2
-    dot_r = dot_diameter // 2
+    dot_r = _SYNC_DOT_DIAMETER // 2
     draw.ellipse((dot_cx - dot_r, dot_cy - dot_r, dot_cx + dot_r, dot_cy + dot_r), fill=_SYNC_DOT_COLOR)
 
-    text_x = dot_cx + dot_r + 10
-    text_y = (y0 + y1) // 2 - _SYNC_LABEL_FONT_SIZE // 2 - 2
-    draw.text((text_x, text_y), _SYNC_LABEL, fill=_SYNC_LABEL_COLOR, font=font)
+    text_x = dot_cx + dot_r + 8
+    text_y = (y0 + y1) // 2 - _SYNC_LABEL_FONT_SIZE // 2 - 1
+    draw.text((text_x, text_y), label, fill=_SYNC_LABEL_COLOR, font=font)
 
 
 def _paste_thumbnail(canvas: Image.Image, thumbnail_path: Path, cell_x: int, cell_y: int) -> None:
@@ -135,16 +143,15 @@ def _paste_thumbnail(canvas: Image.Image, thumbnail_path: Path, cell_x: int, cel
 
 
 def _draw_caption(draw: ImageDraw.ImageDraw, title: str, cell_x: int, cell_y: int, font) -> None:
-    caption = _truncate(title, draw, font)
+    caption = _truncate_to_width(title, draw, font, _CELL_WIDTH - _CELL_PADDING * 2)
     text_x = cell_x + (_CELL_WIDTH - draw.textlength(caption, font=font)) / 2
     text_y = cell_y + _CELL_PADDING + _THUMBNAIL_MAX_SIZE[1] + 6
     draw.text((text_x, text_y), caption, fill=_TEXT_COLOR, font=font)
 
 
-def _truncate(title: str, draw: ImageDraw.ImageDraw, font) -> str:
-    max_width = _CELL_WIDTH - _CELL_PADDING * 2
-    if draw.textlength(title, font=font) <= max_width:
-        return title
-    while title and draw.textlength(title + "…", font=font) > max_width:
-        title = title[:-1]
-    return title + "…"
+def _truncate_to_width(text: str, draw: ImageDraw.ImageDraw, font, max_width: int) -> str:
+    if draw.textlength(text, font=font) <= max_width:
+        return text
+    while text and draw.textlength(text + "…", font=font) > max_width:
+        text = text[:-1]
+    return text + "…"

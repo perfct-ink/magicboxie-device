@@ -105,7 +105,7 @@ class PlaybackController:
         home: it's drawn into this same image (see idle_screen.py) since
         mpv can only ever show one static file at a time, not a separate
         overlay layer on top of it."""
-        image_path = render_idle_screen(self.library, syncing=self.currently_syncing_movie_title is not None)
+        image_path = render_idle_screen(self.library, syncing_title=self.currently_syncing_movie_title)
         await self.player.show_image(image_path)
 
     async def stop_and_show_idle_screen(self) -> None:
