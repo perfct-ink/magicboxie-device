@@ -1,3 +1,5 @@
+import pytest
+
 from player_app.models import protocol
 from player_app.models.protocol import (
     Command,
@@ -77,3 +79,40 @@ def test_library_decode_ignores_malformed_lines():
         Movie(id=0, title="Ok", duration_seconds=100),
         Movie(id=1, title="Also Ok", duration_seconds=200),
     ]
+
+
+def test_decode_wifi_credentials():
+    ssid = "MyHotspot".encode("utf-8")
+    payload = bytes([len(ssid)]) + ssid + "hunter2".encode("utf-8")
+    assert protocol.decode_wifi_credentials(payload) == ("MyHotspot", "hunter2")
+
+
+def test_decode_wifi_credentials_password_can_contain_pipe():
+    """The library characteristic's "|" delimiter would corrupt a payload
+    like this - decode_wifi_credentials is length-prefixed specifically to
+    avoid that, since a WiFi password can contain any printable character."""
+    ssid = "MyHotspot".encode("utf-8")
+    payload = bytes([len(ssid)]) + ssid + "pa|ss|word".encode("utf-8")
+    assert protocol.decode_wifi_credentials(payload) == ("MyHotspot", "pa|ss|word")
+
+
+def test_decode_wifi_credentials_empty_password_is_valid():
+    """Open networks (no password) are a real case, not malformed input."""
+    ssid = "OpenNetwork".encode("utf-8")
+    payload = bytes([len(ssid)]) + ssid
+    assert protocol.decode_wifi_credentials(payload) == ("OpenNetwork", "")
+
+
+def test_decode_wifi_credentials_rejects_empty_payload():
+    with pytest.raises(ValueError):
+        protocol.decode_wifi_credentials(b"")
+
+
+def test_decode_wifi_credentials_rejects_empty_ssid():
+    with pytest.raises(ValueError):
+        protocol.decode_wifi_credentials(bytes([0]) + "password".encode("utf-8"))
+
+
+def test_decode_wifi_credentials_rejects_payload_shorter_than_declared_ssid():
+    with pytest.raises(ValueError):
+        protocol.decode_wifi_credentials(bytes([10]) + "short".encode("utf-8"))

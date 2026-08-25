@@ -1,11 +1,17 @@
+import asyncio
+from unittest.mock import AsyncMock, patch
+
 from player_app.models.protocol import Movie
 from player_app.views.ble_service import MagicBoxieService
 
 # @characteristic(...) replaces the decorated method with a `characteristic`
 # descriptor object (see bluez_peripheral.gatt.characteristic) rather than
 # leaving it directly callable - the original function it wraps is reachable
-# at .getter_func, taking the service instance explicitly as its first arg.
+# at .getter_func (for a READ characteristic) or .setter_func (for a WRITE
+# one, like wifi_provision), each taking the service instance explicitly as
+# its first arg.
 _library_getter = MagicBoxieService.library.getter_func
+_wifi_provision_setter = MagicBoxieService.wifi_provision.setter_func
 
 
 class _FakeController:
@@ -65,3 +71,27 @@ def test_library_read_offset_zero_starts_a_fresh_snapshot():
 
     fresh_read = _library_getter(service, _FakeOptions(offset=0))
     assert fresh_read == b"1|Beta|200"
+
+
+def test_wifi_provision_write_schedules_apply_with_decoded_credentials():
+    service = _make_service([])
+    ssid = b"MyHotspot"
+    payload = bytes([len(ssid)]) + ssid + b"hunter2"
+
+    async def scenario():
+        with patch("player_app.views.ble_service.apply_wifi_credentials", new=AsyncMock()) as mock_apply:
+            _wifi_provision_setter(service, payload, _FakeOptions(offset=0))
+            # The setter itself only schedules a task (create_task) so it can
+            # return immediately and let BlueZ send the ATT write response -
+            # yield once to actually let that scheduled task run.
+            await asyncio.sleep(0)
+            mock_apply.assert_awaited_once_with("MyHotspot", "hunter2")
+
+    asyncio.run(scenario())
+
+
+def test_wifi_provision_write_drops_malformed_payload_without_scheduling_anything():
+    service = _make_service([])
+    with patch("player_app.views.ble_service.apply_wifi_credentials", new=AsyncMock()) as mock_apply:
+        _wifi_provision_setter(service, b"", _FakeOptions(offset=0))
+    mock_apply.assert_not_called()

@@ -22,6 +22,10 @@ NETWORK_INFO_CHARACTERISTIC_UUID = "3e2c1a00-3b42-4b7e-9c3e-000000000005"
 TRANSCODE_STATUS_CHARACTERISTIC_UUID = "3e2c1a00-3b42-4b7e-9c3e-000000000006"
 # Read-only: see API_VERSION below.
 API_VERSION_CHARACTERISTIC_UUID = "3e2c1a00-3b42-4b7e-9c3e-000000000007"
+# Write-only: lets the phone join the device to a new WiFi network (e.g. an
+# iPhone's Personal Hotspot in a car, with no home network in range) over
+# BLE, without needing SSH access - see views/wifi_provisioning.py.
+WIFI_PROVISION_CHARACTERISTIC_UUID = "3e2c1a00-3b42-4b7e-9c3e-000000000008"
 
 # iOS long-reads cap out at 512 bytes (BLE ATT maximum attribute value length).
 MAX_CHARACTERISTIC_BYTES = 512
@@ -86,6 +90,24 @@ def decode_command(data: bytes) -> Command:
         argument = int.from_bytes(data[1:5], byteorder="little", signed=False)
         return Command(opcode=opcode, argument=argument)
     return Command(opcode=opcode)
+
+
+def decode_wifi_credentials(data: bytes) -> tuple[str, str]:
+    """1 byte SSID length, followed by that many UTF-8 SSID bytes, followed
+    by the UTF-8 password (the rest of the payload). Length-prefixed rather
+    than a delimiter (e.g. the library characteristic's "|") deliberately -
+    a WiFi password can contain any printable character including "|",
+    unlike a movie title where that's merely a theoretical edge case."""
+    if not data:
+        raise ValueError("empty WiFi credentials payload")
+    ssid_length = data[0]
+    if len(data) < 1 + ssid_length:
+        raise ValueError("payload shorter than its declared SSID length")
+    ssid = data[1 : 1 + ssid_length].decode("utf-8")
+    password = data[1 + ssid_length :].decode("utf-8")
+    if not ssid:
+        raise ValueError("empty SSID")
+    return ssid, password
 
 
 def encode_status(state: PlaybackState) -> bytes:

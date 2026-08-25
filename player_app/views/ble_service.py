@@ -16,6 +16,7 @@ from ..controllers.playback_controller import PlaybackController
 from ..models import protocol
 from ..models.protocol import PlaybackState
 from ..util import local_ip
+from .wifi_provisioning import apply_wifi_credentials
 
 logger = logging.getLogger(__name__)
 
@@ -138,3 +139,22 @@ class MagicBoxieService(Service):
         # No NOTIFY - a running device's protocol version can't change
         # without a restart, so there's nothing to push an update for.
         return protocol.encode_api_version()[options.offset :]
+
+    @characteristic(protocol.WIFI_PROVISION_CHARACTERISTIC_UUID, CharFlags.WRITE)
+    def wifi_provision(self, options):
+        pass  # write-only; value handled by the setter below
+
+    @wifi_provision.setter
+    def _wifi_provision_write(self, value, options):
+        try:
+            ssid, password = protocol.decode_wifi_credentials(bytes(value))
+        except ValueError as exc:
+            logger.warning("Dropping malformed WiFi provisioning payload: %s", exc)
+            return
+        # Fire-and-forget, same as command's own setter above: nmcli can
+        # take several seconds (scanning, associating, DHCP), and this
+        # setter itself must return immediately to let BlueZ send the ATT
+        # write response - the phone finds out whether it worked by
+        # watching wifiBaseURL/deviceIPAddress resolve to something on the
+        # new network, not from this write itself.
+        asyncio.create_task(apply_wifi_credentials(ssid, password))
