@@ -15,10 +15,13 @@ HOME_SERVER_PASSWORD :=
 CONTENT_DIR := /content
 SERVICE_NAME := magicboxie-device
 SERVICE_FILE := /etc/systemd/system/$(SERVICE_NAME).service
+SELF_UPDATE_NAME := magicboxie-self-update
+SELF_UPDATE_SERVICE_FILE := /etc/systemd/system/$(SELF_UPDATE_NAME).service
+SELF_UPDATE_TIMER_FILE := /etc/systemd/system/$(SELF_UPDATE_NAME).timer
 
 .PHONY: all setup dev build test clean seed-movies \
 	pi pi-pull pi-install pi-setup pi-seed-movies pi-run pi-test pi-service pi-start pi-stop \
-	pi-restart pi-redeploy pi-logs pi-uninstall pi-clean
+	pi-restart pi-redeploy pi-self-update pi-self-update-service pi-logs pi-uninstall pi-clean
 
 all: dev
 
@@ -79,21 +82,22 @@ clean:
 # One-shot: after copying this directory onto the Pi, `make pi-install` is
 # the single command that gets a running, boot-persistent device - installs
 # packages, seeds sample movies into /content if it's empty, installs+enables
-# the systemd service, and starts it. (The service itself gets video/input/
-# bluetooth access straight from its unit file's SupplementaryGroups, so it
-# doesn't need the installing shell's own group membership to have
-# refreshed - that only matters if you separately use `make pi-run`.)
-pi-install: pi-setup pi-seed-movies pi-service pi-start
+# the systemd service (plus its daily self-update timer), and starts it.
+# (The service itself gets video/input/bluetooth access straight from its
+# unit file's SupplementaryGroups, so it doesn't need the installing shell's
+# own group membership to have refreshed - that only matters if you
+# separately use `make pi-run`.)
+pi-install: pi-setup pi-seed-movies pi-service pi-self-update-service pi-start
 	@echo "pi-install complete - MagicBoxie is running and will start automatically on boot."
 	@echo "Check status with: make pi-logs"
 
 # Day-to-day version of pi-install, for after the device is already set up:
 # pulls whatever's new, re-runs setup (covers newly-added system deps or a
-# changed pyproject.toml - a no-op otherwise), re-renders the systemd unit
-# (covers changes to deploy/magicboxie-device.service.in), and restarts.
-# Every step is idempotent, so this is safe to re-run any time you've
-# pushed changes and want the Pi caught up and running them.
-pi: pi-pull pi-setup pi-service
+# changed pyproject.toml - a no-op otherwise), re-renders the systemd units
+# (covers changes to either deploy/*.in template), and restarts. Every step
+# is idempotent, so this is safe to re-run any time you've pushed changes
+# and want the Pi caught up and running them.
+pi: pi-pull pi-setup pi-service pi-self-update-service
 	sudo systemctl restart $(SERVICE_NAME)
 	@echo "Pi is set up, deployed, and running - check status with: make pi-logs"
 
@@ -174,12 +178,55 @@ pi-redeploy:
 	$(VENV)/bin/pip install -e .
 	sudo systemctl restart $(SERVICE_NAME)
 
+# Pulls the latest code and redeploys, but only if the pull actually brought
+# in new commits - this is what magicboxie-self-update.timer runs once a
+# day (see pi-self-update-service below), so a day with nothing new to
+# install never interrupts whatever's playing with a pointless restart.
+# --ff-only rather than pi-pull's plain `git pull`: this runs unattended, so
+# a diverged history should fail cleanly instead of attempting a merge with
+# no one around to resolve it. Skips the pull entirely if the working tree
+# has local changes (shouldn't happen on a real device, but could during
+# development on one) rather than risking git's merge machinery touching
+# them.
+pi-self-update:
+	@if [ -n "$$(git status --porcelain)" ]; then \
+		echo "pi-self-update: local changes present in $(CURDIR) - skipping"; \
+		exit 0; \
+	fi
+	@before="$$(git rev-parse HEAD)"; \
+	if ! git pull --ff-only; then \
+		echo "pi-self-update: git pull failed (no internet?) - will retry on the next scheduled run"; \
+		exit 0; \
+	fi; \
+	after="$$(git rev-parse HEAD)"; \
+	if [ "$$before" = "$$after" ]; then \
+		echo "pi-self-update: already up to date"; \
+	else \
+		echo "pi-self-update: $$before -> $$after, redeploying"; \
+		$(MAKE) pi-redeploy; \
+	fi
+
+# Renders and enables magicboxie-self-update's service+timer (daily git
+# pull, see pi-self-update above) - part of pi-install/pi so auto-update is
+# on by default rather than a separate opt-in step. Only the .service has
+# placeholders to fill in; the .timer is copied as-is.
+pi-self-update-service:
+	sed \
+		-e 's|@USER@|'"$$(whoami)"'|g' \
+		-e 's|@REPO_DIR@|$(CURDIR)|g' \
+		deploy/magicboxie-self-update.service.in | sudo tee $(SELF_UPDATE_SERVICE_FILE) >/dev/null
+	sudo cp deploy/magicboxie-self-update.timer.in $(SELF_UPDATE_TIMER_FILE)
+	sudo systemctl daemon-reload
+	sudo systemctl enable --now $(SELF_UPDATE_NAME).timer
+	@echo "Self-update timer installed and enabled - runs daily, check with: systemctl list-timers $(SELF_UPDATE_NAME).timer"
+
 pi-logs:
 	journalctl -u $(SERVICE_NAME) -f
 
 pi-uninstall:
 	sudo systemctl disable --now $(SERVICE_NAME) 2>/dev/null || true
-	sudo rm -f $(SERVICE_FILE)
+	sudo systemctl disable --now $(SELF_UPDATE_NAME).timer 2>/dev/null || true
+	sudo rm -f $(SERVICE_FILE) $(SELF_UPDATE_SERVICE_FILE) $(SELF_UPDATE_TIMER_FILE)
 	sudo systemctl daemon-reload
 
 pi-clean:

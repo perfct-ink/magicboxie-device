@@ -1,0 +1,16 @@
+# Template for /etc/systemd/system/magicboxie-self-update.service - rendered
+# and enabled (via its companion .timer) by `make pi-self-update-service`.
+# Oneshot: pulls the latest code once a day (see the .timer) and restarts
+# magicboxie-device.service only if that pull actually brought in new
+# commits - see the `pi-self-update` Makefile target for the actual logic,
+# kept there (rather than inlined here) alongside every other pi-* target.
+[Unit]
+Description=MagicBoxie daily self-update
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=@USER@
+WorkingDirectory=@REPO_DIR@
+ExecStart=/usr/bin/make -C @REPO_DIR@ pi-self-update

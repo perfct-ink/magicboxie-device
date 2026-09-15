@@ -1,0 +1,23 @@
+# Template for /etc/systemd/system/magicboxie-self-update.timer - rendered
+# and enabled by `make pi-self-update-service`. No placeholders to fill in
+# (unlike the .service.in next to this), so that target just copies it
+# as-is rather than piping it through sed.
+#
+# Fires magicboxie-self-update.service once a day. Persistent=true means a
+# run the device missed entirely - powered off, or offline, at the
+# scheduled time - fires as soon as the timer next gets a chance to run
+# instead of being skipped until the following day; that, plus the
+# service's own git-pull-just-fails-quietly-when-offline handling, is what
+# "whenever it gets internet" actually reduces to here - there's no separate
+# connectivity check. RandomizedDelaySec spreads the actual pull out over an
+# hour rather than every device hitting the git remote at the same instant.
+[Unit]
+Description=Run MagicBoxie's daily self-update
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target
