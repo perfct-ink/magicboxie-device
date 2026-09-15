@@ -139,7 +139,7 @@ class MpvController:
             logger.warning("mpv command %r failed: %s", args, response.get("error"))
         return response
 
-    async def load(self, path: Path) -> None:
+    async def load(self, path: Path, *, start_seconds: int = 0, paused: bool = False) -> None:
         # pause=no is passed as part of loadfile's own options rather than as
         # a separate play() call afterward: loadfile acknowledges near-
         # instantly, but actually opening/probing the file happens
@@ -149,6 +149,11 @@ class MpvController:
         # that finished, and got silently reset to paused once mpv's own
         # load transition completed. Setting it as a loadfile option applies
         # atomically as part of the same load, so there's no race to lose.
+        # start=<seconds> rides along in the same options string for exactly
+        # the same reason - resuming a persisted position (see
+        # PlaybackController.restore_last_playback) needs to land in the same
+        # atomic step, not a separate seek() afterward that could just as
+        # easily lose the same race.
         #
         # mpv's loadfile signature is <url> [<flags> [<index> [<options>]]] -
         # options is the 4th positional, not the 3rd; passing it 3rd (as an
@@ -156,7 +161,8 @@ class MpvController:
         # integer <index> and reject the whole command with "invalid
         # parameter", silently. index is irrelevant for "replace" but must
         # still be passed positionally to reach options.
-        await self._command("loadfile", str(path), "replace", 0, "pause=no")
+        options = f"start={start_seconds},pause={'yes' if paused else 'no'}"
+        await self._command("loadfile", str(path), "replace", 0, options)
 
     async def show_image(self, path: Path) -> None:
         """Like load(), but for a still image meant to sit on screen

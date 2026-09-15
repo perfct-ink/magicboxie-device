@@ -3,8 +3,10 @@ independent of whether commands arrive over BLE or plain HTTP."""
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
+from pathlib import Path
 from typing import List, Optional
 
 from ..models.idle_screen import render_idle_screen
@@ -21,10 +23,17 @@ PAUSE_DIM_PERCENT = 10
 
 
 class PlaybackController:
-    def __init__(self, library: MovieLibrary, player: MpvController):
+    def __init__(self, library: MovieLibrary, player: MpvController, state_path: Optional[Path] = None):
         self.library = library
         self.player = player
         self._current_movie_id: Optional[int] = None
+        # Where the currently-selected movie/position/paused-ness gets
+        # persisted (see _save_playback_state/restore_last_playback) so a
+        # power loss or reboot can pick back up instead of dropping back to
+        # the idle screen. None (the default, and what every existing test
+        # here gets) disables persistence entirely rather than writing
+        # somewhere real - main.py is the only caller that passes one.
+        self._state_path = state_path
         # Set/cleared by TranscodeService, read by ble_service.py's status
         # poll loop to notify the app - a shared hub between the two rather
         # than a direct dependency between them, mirroring how is_idle
@@ -115,6 +124,7 @@ class PlaybackController:
         frame."""
         await self.player.stop()
         self._current_movie_id = None
+        self._clear_playback_state()
         # The pause icon/dim are a separate overlay layer from whatever's
         # loaded, so stopping while paused would otherwise leave them
         # visible over the idle screen.
@@ -125,19 +135,92 @@ class PlaybackController:
     async def refresh_status(self) -> PlaybackState:
         # Nothing selected - already known to be idle without asking mpv,
         # which would otherwise report "not idle" while the idle-screen
-        # image itself is loaded (see MpvController.show_image).
+        # image itself is loaded (see MpvController.show_image). Persisted
+        # state was already cleared at the point _current_movie_id became
+        # None (below, or in stop_and_show_idle_screen), so there's nothing
+        # left to do here.
         if self._current_movie_id is None:
             return PlaybackState.idle()
 
         idle = await self.player.get_idle()
         if idle:
             self._current_movie_id = None
+            self._clear_playback_state()
             return PlaybackState.idle()
 
         paused = await self.player.get_paused()
         position = await self.player.get_position()
+        # Called on every refresh - roughly once a second via ble_service's
+        # status poll loop - so a power loss or ungraceful kill (the case
+        # that actually matters here: this device has no graceful-shutdown
+        # signal on real power loss) never loses more than ~1s of position.
+        self._save_playback_state(self._current_movie_id, position, paused)
         return PlaybackState(
             status=PlaybackStatus.PAUSED if paused else PlaybackStatus.PLAYING,
             movie_id=self._current_movie_id,
             position_seconds=position,
         )
+
+    def _save_playback_state(self, movie_id: int, position_seconds: int, paused: bool) -> None:
+        if self._state_path is None:
+            return
+        try:
+            self._state_path.parent.mkdir(parents=True, exist_ok=True)
+            self._state_path.write_text(json.dumps({
+                "movie_id": movie_id,
+                "position_seconds": position_seconds,
+                "paused": paused,
+            }))
+        except OSError:
+            logger.warning("Failed to persist playback state to %s", self._state_path)
+
+    def _clear_playback_state(self) -> None:
+        if self._state_path is None:
+            return
+        try:
+            self._state_path.unlink(missing_ok=True)
+        except OSError:
+            logger.warning("Failed to clear persisted playback state at %s", self._state_path)
+
+    async def restore_last_playback(self) -> bool:
+        """Resumes whatever was selected the last time the device ran - see
+        _save_playback_state above for where this gets written, continuously,
+        while something's selected. Meant to be called once at startup,
+        after the library has been scanned (a persisted movie id only means
+        anything once it can be checked against a freshly-scanned library -
+        see main.py's _run_library_scan). Returns whether it actually
+        resumed something, so the caller knows whether to fall back to
+        show_idle_screen() itself."""
+        if self._state_path is None or not self._state_path.is_file():
+            return False
+
+        try:
+            data = json.loads(self._state_path.read_text())
+            movie_id = int(data["movie_id"])
+            position_seconds = int(data["position_seconds"])
+            paused = bool(data["paused"])
+        except (OSError, ValueError, KeyError, TypeError):
+            logger.warning("Failed to read persisted playback state from %s - ignoring", self._state_path)
+            self._clear_playback_state()
+            return False
+
+        if not any(movie.id == movie_id for movie in self.movies):
+            # The movie was deleted, or the library changed, since this was
+            # written - same "stale reference" handling as an unknown
+            # SELECT_MOVIE id in handle_command.
+            logger.info("Persisted playback state names movie %d, no longer in the library - ignoring", movie_id)
+            self._clear_playback_state()
+            return False
+
+        self._current_movie_id = movie_id
+        await self.player.load(
+            self.library.playable_path_for(movie_id),
+            start_seconds=position_seconds,
+            paused=paused,
+        )
+        if paused:
+            await self.player.show_pause_icon()
+            await self.player.set_dim(PAUSE_DIM_PERCENT)
+        else:
+            await self.player.set_dim(0)
+        return True

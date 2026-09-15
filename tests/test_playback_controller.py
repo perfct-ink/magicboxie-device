@@ -1,4 +1,5 @@
 import asyncio
+import json
 from unittest.mock import AsyncMock, patch
 
 from fakes import FakeLibrary, FakeMpv
@@ -156,3 +157,145 @@ def test_shutdown_invokes_systemctl_poweroff_via_sudo():
 
     mock_exec = asyncio.run(scenario())
     mock_exec.assert_awaited_once_with("sudo", "systemctl", "poweroff")
+
+
+def test_refresh_status_persists_playback_state(tmp_path):
+    state_path = tmp_path / "playback_state.json"
+
+    async def scenario():
+        mpv = FakeMpv()
+        controller = PlaybackController(FakeLibrary(), mpv, state_path=state_path)
+        await controller.handle_command(Command(opcode=Opcode.SELECT_MOVIE, argument=1))
+        mpv.position = 42
+        await controller.refresh_status()
+
+    asyncio.run(scenario())
+
+    assert json.loads(state_path.read_text()) == {
+        "movie_id": 1,
+        "position_seconds": 42,
+        "paused": False,
+    }
+
+
+def test_stopping_clears_persisted_state(tmp_path):
+    state_path = tmp_path / "playback_state.json"
+
+    async def scenario():
+        controller = PlaybackController(FakeLibrary(), FakeMpv(), state_path=state_path)
+        await controller.handle_command(Command(opcode=Opcode.SELECT_MOVIE, argument=0))
+        await controller.refresh_status()
+        await controller.handle_command(Command(opcode=Opcode.STOP))
+
+    asyncio.run(scenario())
+
+    assert not state_path.exists()
+
+
+def test_movie_finishing_naturally_clears_persisted_state(tmp_path):
+    state_path = tmp_path / "playback_state.json"
+
+    async def scenario():
+        mpv = FakeMpv()
+        controller = PlaybackController(FakeLibrary(), mpv, state_path=state_path)
+        await controller.handle_command(Command(opcode=Opcode.SELECT_MOVIE, argument=0))
+        await controller.refresh_status()
+        mpv.idle = True  # mpv reports the file played through to the end
+        await controller.refresh_status()
+
+    asyncio.run(scenario())
+
+    assert not state_path.exists()
+
+
+def test_no_persistence_without_a_state_path():
+    """The default (no state_path passed) must not try to write anywhere -
+    every other test in this file relies on that."""
+    async def scenario():
+        controller = PlaybackController(FakeLibrary(), FakeMpv())
+        await controller.handle_command(Command(opcode=Opcode.SELECT_MOVIE, argument=0))
+        await controller.refresh_status()
+        return controller
+
+    controller = asyncio.run(scenario())
+    assert controller._state_path is None
+
+
+def test_restore_last_playback_resumes_movie_and_position(tmp_path):
+    state_path = tmp_path / "playback_state.json"
+    state_path.write_text(json.dumps({"movie_id": 1, "position_seconds": 123, "paused": False}))
+
+    async def scenario():
+        mpv = FakeMpv()
+        controller = PlaybackController(FakeLibrary(), mpv, state_path=state_path)
+        resumed = await controller.restore_last_playback()
+        return controller, mpv, resumed
+
+    controller, mpv, resumed = asyncio.run(scenario())
+    assert resumed is True
+    assert not controller.is_idle
+    assert mpv.loaded_path == FakeLibrary()._paths[1]
+    assert mpv.position == 123
+    assert not mpv.paused
+
+
+def test_restore_last_playback_resumes_paused_state(tmp_path):
+    state_path = tmp_path / "playback_state.json"
+    state_path.write_text(json.dumps({"movie_id": 0, "position_seconds": 10, "paused": True}))
+
+    async def scenario():
+        mpv = FakeMpv()
+        controller = PlaybackController(FakeLibrary(), mpv, state_path=state_path)
+        await controller.restore_last_playback()
+        return mpv
+
+    mpv = asyncio.run(scenario())
+    assert mpv.paused
+    assert mpv.pause_icon_shown
+    assert mpv.dim_percent == PAUSE_DIM_PERCENT
+
+
+def test_restore_last_playback_returns_false_with_no_state_file(tmp_path):
+    async def scenario():
+        controller = PlaybackController(FakeLibrary(), FakeMpv(), state_path=tmp_path / "missing.json")
+        return await controller.restore_last_playback()
+
+    assert asyncio.run(scenario()) is False
+
+
+def test_restore_last_playback_returns_false_without_a_state_path():
+    async def scenario():
+        controller = PlaybackController(FakeLibrary(), FakeMpv())
+        return await controller.restore_last_playback()
+
+    assert asyncio.run(scenario()) is False
+
+
+def test_restore_last_playback_ignores_movie_no_longer_in_library(tmp_path):
+    state_path = tmp_path / "playback_state.json"
+    state_path.write_text(json.dumps({"movie_id": 99999, "position_seconds": 5, "paused": False}))
+
+    async def scenario():
+        mpv = FakeMpv()
+        controller = PlaybackController(FakeLibrary(), mpv, state_path=state_path)
+        resumed = await controller.restore_last_playback()
+        return controller, mpv, resumed
+
+    controller, mpv, resumed = asyncio.run(scenario())
+    assert resumed is False
+    assert controller.is_idle
+    assert mpv.loaded_path is None
+    assert not state_path.exists()
+
+
+def test_restore_last_playback_ignores_corrupt_state_file(tmp_path):
+    state_path = tmp_path / "playback_state.json"
+    state_path.write_text("not valid json")
+
+    async def scenario():
+        controller = PlaybackController(FakeLibrary(), FakeMpv(), state_path=state_path)
+        return await controller.restore_last_playback()
+
+    resumed = asyncio.run(scenario())
+    assert resumed is False
+    assert not state_path.exists()

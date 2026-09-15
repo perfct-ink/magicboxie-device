@@ -14,10 +14,11 @@ class FakeMpv:
         self.dim_percent = 0
         self.pause_icon_shown = False
 
-    async def load(self, path):
+    async def load(self, path, *, start_seconds=0, paused=False):
         self.loaded_path = path
         self.idle = False
-        self.paused = False
+        self.paused = paused
+        self.position = start_seconds
 
     async def show_image(self, path):
         self.shown_image_path = path

@@ -33,6 +33,12 @@ DEVICE_NAME = "MagicBoxieDevice"
 MOVIES_DIR = Path(os.environ.get("MAGICBOXIE_MOVIES_DIR", "/movies"))
 THUMBNAIL_DIR = Path(os.environ.get("MAGICBOXIE_THUMBNAIL_DIR", "/var/lib/magicboxie/thumbnails"))
 TRANSCODE_DIR = Path(os.environ.get("MAGICBOXIE_TRANSCODE_DIR", "/var/lib/magicboxie/transcoded"))
+# Where the currently-selected movie/position gets persisted so a power loss
+# or reboot resumes instead of dropping back to the idle screen - see
+# PlaybackController.restore_last_playback. Lives alongside the thumbnail
+# cache rather than under MOVIES_DIR since that's typically mounted
+# read-only (see library.py's own THUMBNAIL_DIR comment).
+PLAYBACK_STATE_PATH = THUMBNAIL_DIR / "playback_state.json"
 
 # "ble" (default, real device) or "http" (dev/testing - no Bluetooth required,
 # e.g. when there's no BlueZ available such as Docker Desktop on macOS).
@@ -84,7 +90,7 @@ async def _run() -> None:
     player = MpvController(extra_args=_mpv_output_args())
     await player.start()
 
-    controller = PlaybackController(library, player)
+    controller = PlaybackController(library, player, state_path=PLAYBACK_STATE_PATH)
     # Resting state until something's selected to play - the screen should
     # never just be black/whatever mpv's own idle window looks like. Shows
     # empty for now; library.scan() runs concurrently below (_run_library_scan)
@@ -160,11 +166,17 @@ async def _run_mdns(stop_event: asyncio.Event) -> None:
 
 async def _run_library_scan(controller: PlaybackController, stop_event: asyncio.Event) -> None:
     """Scans the movie library in a background thread (MovieLibrary.scan()
-    is a blocking chain of ffprobe/ffmpeg subprocess calls) and refreshes
-    the idle screen once it's done. One-shot, not retried on an interval -
+    is a blocking chain of ffprobe/ffmpeg subprocess calls), then either
+    resumes whatever was playing when the device last stopped or, failing
+    that, refreshes the idle screen. One-shot, not retried on an interval -
     runs concurrently with BLE/mDNS/HTTP registration rather than before it,
     so the device is discoverable/controllable immediately instead of only
     after a scan that can take minutes for a real library.
+
+    Resuming has to wait for the scan rather than happening at startup
+    alongside the initial show_idle_screen() in _run(): a persisted movie id
+    can only be checked against the library once it's actually been scanned,
+    and _run()'s own call happens before that scan has run at all.
 
     run_in_executor isn't interruptible by stop_event - a shutdown mid-scan
     (e.g. a redeploy restart) lets the scan run to completion in the
@@ -176,7 +188,9 @@ async def _run_library_scan(controller: PlaybackController, stop_event: asyncio.
     """
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, controller.library.scan)
-    if not stop_event.is_set():
+    if stop_event.is_set():
+        return
+    if not await controller.restore_last_playback():
         await controller.show_idle_screen()
 
 
