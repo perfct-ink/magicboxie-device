@@ -13,6 +13,10 @@ HOME_SERVER_PASSWORD :=
 # this repo happens to be checked out, unlike MOVIES_DIR above (which is
 # Docker-dev-only, relative to the repo, and unrelated to the real device).
 CONTENT_DIR := /content
+# Matches MAGICBOXIE_HTTP_PORT's own default (see main.py) - only used here
+# to poll the device's own /api/status from pi-wait-until-idle below, so
+# override this too if you've overridden that.
+HTTP_PORT := 8000
 SERVICE_NAME := magicboxie-device
 SERVICE_FILE := /etc/systemd/system/$(SERVICE_NAME).service
 SELF_UPDATE_NAME := magicboxie-self-update
@@ -21,7 +25,8 @@ SELF_UPDATE_TIMER_FILE := /etc/systemd/system/$(SELF_UPDATE_NAME).timer
 
 .PHONY: all setup dev build test clean seed-movies \
 	pi pi-pull pi-install pi-setup pi-seed-movies pi-run pi-test pi-service pi-start pi-stop \
-	pi-restart pi-redeploy pi-self-update pi-self-update-service pi-logs pi-uninstall pi-clean
+	pi-restart pi-redeploy pi-wait-until-idle pi-self-update pi-self-update-service pi-logs \
+	pi-uninstall pi-clean
 
 all: dev
 
@@ -104,10 +109,11 @@ pi: pi-pull pi-setup pi-service pi-self-update-service
 pi-pull:
 	git pull
 
-# System packages (mpv/ffmpeg/bluez + build headers for evdev/Pillow) and a
-# venv with the app installed. Adds the invoking user to the video/input/
-# bluetooth groups it needs for DRM output, keyboard Escape-to-stop, and
-# BLE - re-login (or reboot) is required for that group change to apply.
+# System packages (mpv/ffmpeg/bluez + build headers for evdev/Pillow, curl
+# for pi-wait-until-idle's polling below) and a venv with the app installed.
+# Adds the invoking user to the video/input/bluetooth groups it needs for
+# DRM output, keyboard Escape-to-stop, and BLE - re-login (or reboot) is
+# required for that group change to apply.
 pi-setup:
 	@command -v apt-get >/dev/null || { echo "apt-get not found - pi-* targets are for Raspberry Pi OS/Debian"; exit 1; }
 	sudo apt-get update
@@ -115,7 +121,8 @@ pi-setup:
 		python3-venv python3-dev build-essential \
 		mpv ffmpeg libjpeg-dev zlib1g-dev \
 		fonts-dejavu-core \
-		bluez dbus
+		bluez dbus \
+		curl
 	sudo usermod -aG video,input,bluetooth "$$(whoami)"
 	python3 -m venv $(VENV)
 	$(VENV)/bin/pip install --upgrade pip
@@ -178,16 +185,36 @@ pi-redeploy:
 	$(VENV)/bin/pip install -e .
 	sudo systemctl restart $(SERVICE_NAME)
 
+# Blocks until nothing's selected to play (PlaybackStatus.STOPPED, reported
+# as "stopped" by /api/status - see playback_controller.py's refresh_status
+# and web_service.py's _get_status), so pi-self-update's restart never cuts
+# off a movie mid-playback. Polls the local HTTP API rather than the BLE
+# characteristic since that's always running regardless of
+# MAGICBOXIE_TRANSPORT (see main.py's _run()) and trivial to curl. No
+# timeout: if something's playing back-to-back for hours, the update just
+# waits for the next natural gap - the alternative (forcing it) is exactly
+# the interruption this exists to avoid. A dead/unreachable HTTP API (server
+# still starting up, one bad poll) reads as "" here, which never matches
+# "stopped", so it just keeps polling rather than mistaking that for idle.
+pi-wait-until-idle:
+	@status=""; \
+	while [ "$$status" != "stopped" ]; do \
+		sleep 30; \
+		status="$$(curl -s --max-time 5 http://localhost:$(HTTP_PORT)/api/status | python3 -c 'import json,sys; print(json.load(sys.stdin).get("status", ""))' 2>/dev/null)"; \
+	done
+
 # Pulls the latest code and redeploys, but only if the pull actually brought
 # in new commits - this is what magicboxie-self-update.timer runs once a
 # day (see pi-self-update-service below), so a day with nothing new to
 # install never interrupts whatever's playing with a pointless restart.
-# --ff-only rather than pi-pull's plain `git pull`: this runs unattended, so
-# a diverged history should fail cleanly instead of attempting a merge with
-# no one around to resolve it. Skips the pull entirely if the working tree
-# has local changes (shouldn't happen on a real device, but could during
-# development on one) rather than risking git's merge machinery touching
-# them.
+# Waits for playback to be idle (pi-wait-until-idle above) before
+# redeploying, so even a real update never cuts off a movie already in
+# progress. --ff-only rather than pi-pull's plain `git pull`: this runs
+# unattended, so a diverged history should fail cleanly instead of
+# attempting a merge with no one around to resolve it. Skips the pull
+# entirely if the working tree has local changes (shouldn't happen on a
+# real device, but could during development on one) rather than risking
+# git's merge machinery touching them.
 pi-self-update:
 	@if [ -n "$$(git status --porcelain)" ]; then \
 		echo "pi-self-update: local changes present in $(CURDIR) - skipping"; \
@@ -202,7 +229,9 @@ pi-self-update:
 	if [ "$$before" = "$$after" ]; then \
 		echo "pi-self-update: already up to date"; \
 	else \
-		echo "pi-self-update: $$before -> $$after, redeploying"; \
+		echo "pi-self-update: $$before -> $$after, waiting for playback to be idle before redeploying"; \
+		$(MAKE) pi-wait-until-idle; \
+		echo "pi-self-update: idle now, redeploying"; \
 		$(MAKE) pi-redeploy; \
 	fi
 
