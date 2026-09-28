@@ -6,6 +6,7 @@ from player_app.models.protocol import Movie
 
 class FakeMpv:
     def __init__(self):
+        self.finished = False
         self.loaded_path = None
         self.shown_image_path = None
         self.paused = True
@@ -15,12 +16,14 @@ class FakeMpv:
         self.pause_icon_shown = False
 
     async def load(self, path, *, start_seconds=0, paused=False):
+        self.finished = False
         self.loaded_path = path
         self.idle = False
         self.paused = paused
         self.position = start_seconds
 
     async def show_image(self, path):
+        self.finished = False
         self.shown_image_path = path
         self.idle = False
         self.paused = True
@@ -32,6 +35,7 @@ class FakeMpv:
         self.paused = True
 
     async def stop(self):
+        self.finished = False
         self.idle = True
         self.paused = True
         self.position = 0

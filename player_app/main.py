@@ -109,6 +109,7 @@ async def _run() -> None:
             _run_keyboard(controller, stop_event),
             _run_mdns(stop_event),
             _run_library_scan(controller, stop_event),
+            _run_playback(controller, stop_event),
             _run_transcode(controller, stop_event),
             _run_idle_dim(controller, stop_event),
         ]
@@ -165,33 +166,19 @@ async def _run_mdns(stop_event: asyncio.Event) -> None:
 
 
 async def _run_library_scan(controller: PlaybackController, stop_event: asyncio.Event) -> None:
-    """Scans the movie library in a background thread (MovieLibrary.scan()
-    is a blocking chain of ffprobe/ffmpeg subprocess calls), then either
-    resumes whatever was playing when the device last stopped or, failing
-    that, refreshes the idle screen. One-shot, not retried on an interval -
-    runs concurrently with BLE/mDNS/HTTP registration rather than before it,
-    so the device is discoverable/controllable immediately instead of only
-    after a scan that can take minutes for a real library.
-
-    Resuming has to wait for the scan rather than happening at startup
-    alongside the initial show_idle_screen() in _run(): a persisted movie id
-    can only be checked against the library once it's actually been scanned,
-    and _run()'s own call happens before that scan has run at all.
-
-    run_in_executor isn't interruptible by stop_event - a shutdown mid-scan
-    (e.g. a redeploy restart) lets the scan run to completion in the
-    background regardless, by which point systemd's SIGTERM may already
-    have killed mpv too (KillMode=control-group sends it to the whole
-    process group, mpv included). Checking stop_event before touching mpv
-    again avoids writing to that now-dead connection and crashing the
-    daemon on the way out.
-    """
+    """Scan without blocking transports, then autoplay unless input arrived."""
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, controller.library.scan)
     if stop_event.is_set():
         return
-    if not await controller.restore_last_playback():
-        await controller.show_idle_screen()
+    await controller.start_random_playback()
+
+
+async def _run_playback(controller: PlaybackController, stop_event: asyncio.Event) -> None:
+    """Advance and persist playback even without connected clients or BLE."""
+    while not stop_event.is_set():
+        await controller.refresh_status()
+        await sleep_unless_stopped(stop_event, 1)
 
 
 async def _run_transcode(controller: PlaybackController, stop_event: asyncio.Event) -> None:

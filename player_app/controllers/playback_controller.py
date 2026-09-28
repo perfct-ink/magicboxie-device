@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import random
 import time
 from pathlib import Path
 from typing import List, Optional
@@ -27,6 +28,8 @@ class PlaybackController:
         self.library = library
         self.player = player
         self._current_movie_id: Optional[int] = None
+        self._playback_lock: Optional[asyncio.Lock] = None
+        self._startup_input_at = time.monotonic()
         # Where the currently-selected movie/position/paused-ness gets
         # persisted (see _save_playback_state/restore_last_playback) so a
         # power loss or reboot can pick back up instead of dropping back to
@@ -50,7 +53,14 @@ class PlaybackController:
         # knows when to dim the idle screen. monotonic(), not wall-clock
         # time, since it only needs to measure elapsed duration and can't
         # be upset by clock adjustments.
-        self.last_input_at: float = time.monotonic()
+        self.last_input_at: float = self._startup_input_at
+
+    @property
+    def _lock(self) -> asyncio.Lock:
+        # Python 3.9 binds locks to the loop at construction time.
+        if self._playback_lock is None:
+            self._playback_lock = asyncio.Lock()
+        return self._playback_lock
 
     @property
     def movies(self) -> List[Movie]:
@@ -66,6 +76,10 @@ class PlaybackController:
 
     async def handle_command(self, cmd: Command) -> None:
         self.last_input_at = time.monotonic()
+        async with self._lock:
+            await self._handle_command(cmd)
+
+    async def _handle_command(self, cmd: Command) -> None:
         if cmd.opcode == Opcode.SELECT_MOVIE and cmd.argument is not None:
             if not any(movie.id == cmd.argument for movie in self.movies):
                 # A client's cached movie list can be stale relative to what
@@ -89,7 +103,7 @@ class PlaybackController:
             await self.player.show_pause_icon()
             await self.player.set_dim(PAUSE_DIM_PERCENT)
         elif cmd.opcode == Opcode.STOP:
-            await self.stop_and_show_idle_screen()
+            await self._stop_and_show_idle_screen()
         elif cmd.opcode == Opcode.SEEK and cmd.argument is not None:
             await self.player.seek(cmd.argument)
         elif cmd.opcode == Opcode.SHUTDOWN:
@@ -118,6 +132,11 @@ class PlaybackController:
         await self.player.show_image(image_path)
 
     async def stop_and_show_idle_screen(self) -> None:
+        self.last_input_at = time.monotonic()
+        async with self._lock:
+            await self._stop_and_show_idle_screen()
+
+    async def _stop_and_show_idle_screen(self) -> None:
         """What both an explicit stop command and the local keyboard's
         Escape key do - stop whatever's playing and return to the thumbnail
         grid, so the screen never just goes blank or freezes on the last
@@ -132,7 +151,32 @@ class PlaybackController:
         await self.player.set_dim(0)
         await self.show_idle_screen()
 
+    async def start_random_playback(self) -> None:
+        """Start once the library is ready, unless startup input took priority."""
+        async with self._lock:
+            if self.last_input_at != self._startup_input_at or not self.is_idle:
+                return
+            self._clear_playback_state()
+            if not await self._play_random_movie():
+                await self.show_idle_screen()
+
+    async def _play_random_movie(self, exclude_id: Optional[int] = None) -> bool:
+        candidates = [movie for movie in self.movies if movie.id != exclude_id]
+        if not candidates:
+            return False
+        movie = random.choice(candidates)
+        self._current_movie_id = movie.id
+        await self.player.load(self.library.playable_path_for(movie.id))
+        await self.player.hide_pause_icon()
+        await self.player.set_dim(0)
+        self._save_playback_state(movie.id, 0, False)
+        return True
+
     async def refresh_status(self) -> PlaybackState:
+        async with self._lock:
+            return await self._refresh_status()
+
+    async def _refresh_status(self) -> PlaybackState:
         # Nothing selected - already known to be idle without asking mpv,
         # which would otherwise report "not idle" while the idle-screen
         # image itself is loaded (see MpvController.show_image). Persisted
@@ -141,6 +185,12 @@ class PlaybackController:
         # left to do here.
         if self._current_movie_id is None:
             return PlaybackState.idle()
+
+        if self.player.finished:
+            previous_movie_id = self._current_movie_id
+            if not await self._play_random_movie(exclude_id=previous_movie_id):
+                await self._stop_and_show_idle_screen()
+                return PlaybackState.idle()
 
         idle = await self.player.get_idle()
         if idle:

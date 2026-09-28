@@ -41,6 +41,8 @@ _PAUSE_ICON_ASS = (
 
 class MpvController:
     def __init__(self, socket_path: str = "/tmp/magicboxie-mpv.sock", extra_args: Optional[List[str]] = None):
+        self.finished = False
+        self._loading = False
         self._socket_path = socket_path
         self._extra_args = extra_args or []
         self._process: Optional[asyncio.subprocess.Process] = None
@@ -115,6 +117,12 @@ class MpvController:
                 message = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            if message.get("event") == "file-loaded" or (
+                message.get("event") == "end-file" and message.get("reason") in ("eof", "error")
+            ):
+                self._loading = False
+            if message.get("event") == "end-file" and message.get("reason") == "eof":
+                self.finished = True
             request_id = message.get("request_id")
             if request_id is not None and request_id in self._pending:
                 self._pending.pop(request_id).set_result(message)
@@ -161,8 +169,12 @@ class MpvController:
         # integer <index> and reject the whole command with "invalid
         # parameter", silently. index is irrelevant for "replace" but must
         # still be passed positionally to reach options.
+        self.finished = False
+        self._loading = True
         options = f"start={start_seconds},pause={'yes' if paused else 'no'}"
-        await self._command("loadfile", str(path), "replace", 0, options)
+        response = await self._command("loadfile", str(path), "replace", 0, options)
+        if response.get("error") != "success":
+            self._loading = False
 
     async def show_image(self, path: Path) -> None:
         """Like load(), but for a still image meant to sit on screen
@@ -171,6 +183,7 @@ class MpvController:
         otherwise drop it back to idle almost immediately. Options is the
         4th positional arg (see load()'s comment) - index 0 in between is
         required to reach it, not optional."""
+        self.finished = False
         await self._command("loadfile", str(path), "replace", 0, "image-display-duration=inf")
 
     async def play(self) -> None:
@@ -180,6 +193,7 @@ class MpvController:
         await self._command("set_property", "pause", True)
 
     async def stop(self) -> None:
+        self.finished = False
         await self._command("stop")
 
     async def seek(self, position_seconds: int) -> None:
@@ -200,6 +214,9 @@ class MpvController:
             return True
 
     async def get_idle(self) -> bool:
+        # A load is acknowledged before probing finishes; it is not an idle movie.
+        if self._loading:
+            return False
         try:
             response = await self._command("get_property", "idle-active")
             return bool(response.get("data"))
