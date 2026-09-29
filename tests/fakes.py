@@ -6,6 +6,9 @@ from player_app.models.protocol import Movie
 
 class FakeMpv:
     def __init__(self):
+        self.loading = False
+        self.media_failed = False
+        self.failed = False
         self.finished = False
         self.loaded_path = None
         self.shown_image_path = None
@@ -16,6 +19,8 @@ class FakeMpv:
         self.pause_icon_shown = False
 
     async def load(self, path, *, start_seconds=0, paused=False):
+        self.media_failed = False
+        self.failed = False
         self.finished = False
         self.loaded_path = path
         self.idle = False
@@ -23,6 +28,8 @@ class FakeMpv:
         self.position = start_seconds
 
     async def show_image(self, path):
+        self.media_failed = False
+        self.failed = False
         self.finished = False
         self.shown_image_path = path
         self.idle = False
@@ -35,6 +42,8 @@ class FakeMpv:
         self.paused = True
 
     async def stop(self):
+        self.media_failed = False
+        self.failed = False
         self.finished = False
         self.idle = True
         self.paused = True
@@ -90,6 +99,9 @@ class FakeLibrary:
     def playable_path_for(self, movie_id):
         transcoded = self.transcode_path_for(movie_id)
         return transcoded if transcoded.exists() else self._paths[movie_id]
+
+    def quarantine_failed_playback(self, movie_id):
+        return False
 
     def thumbnail_path_for(self, movie_id):
         return self._thumbnail_paths.get(movie_id)

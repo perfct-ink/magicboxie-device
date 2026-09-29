@@ -8,10 +8,12 @@ in Docker Desktop on macOS) or no BLE-capable client at hand.
 from __future__ import annotations
 
 import logging
+import uuid
 from pathlib import Path
 
 from aiohttp import web
 
+from ..storage import publish_file, run_io
 from ..controllers.playback_controller import PlaybackController
 from ..models.library import VIDEO_EXTENSIONS
 from ..models.protocol import API_VERSION, Command, Movie, Opcode
@@ -83,7 +85,7 @@ async def _post_rescan(request: web.Request) -> web.Response:
     filesystem directly (outside POST /api/movies) show up without
     restarting the daemon."""
     controller = request.app[_CONTROLLER_KEY]
-    controller.library.scan()
+    await run_io(controller.library.scan)
     return web.json_response(_movies_payload(controller))
 
 
@@ -104,7 +106,7 @@ async def _delete_movie(request: web.Request) -> web.Response:
     if state.movie_id == movie_id:
         await controller.stop_and_show_idle_screen()
 
-    controller.library.delete(movie_id)
+    await run_io(controller.library.delete, movie_id)
     return web.json_response({"ok": True})
 
 
@@ -129,21 +131,22 @@ async def _post_movie(request: web.Request) -> web.Response:
     if dest_path.exists():
         return web.json_response({"error": "a file with this name already exists"}, status=409)
 
+    temporary = dest_path.with_name("." + dest_path.name + "." + uuid.uuid4().hex + ".partial")
     bytes_written = 0
     try:
-        with dest_path.open("wb") as f:
+        with temporary.open("xb") as f:
             async for chunk in request.content.iter_chunked(_UPLOAD_CHUNK_BYTES):
-                f.write(chunk)
+                await run_io(f.write, chunk)
                 bytes_written += len(chunk)
-    except Exception:
-        dest_path.unlink(missing_ok=True)
-        raise
+        if bytes_written == 0:
+            return web.json_response({"error": "empty body"}, status=400)
+        await run_io(publish_file, temporary, dest_path)
+    except FileExistsError:
+        return web.json_response({"error": "upload already in progress"}, status=409)
+    finally:
+        temporary.unlink(missing_ok=True)
 
-    if bytes_written == 0:
-        dest_path.unlink(missing_ok=True)
-        return web.json_response({"error": "empty body"}, status=400)
-
-    controller.library.scan()
+    await run_io(controller.library.scan)
     title = Path(filename).stem
     movie = next((m for m in controller.movies if m.title == title), None)
     if movie is None:
@@ -187,7 +190,7 @@ async def _post_thumbnail(request: web.Request) -> web.Response:
     if not data:
         return web.json_response({"error": "empty body"}, status=400)
 
-    controller.library.save_uploaded_thumbnail(movie_id, data)
+    await run_io(controller.library.save_uploaded_thumbnail, movie_id, data)
     return web.json_response({"ok": True})
 
 
@@ -222,7 +225,7 @@ async def _post_metadata(request: web.Request) -> web.Response:
             {"error": f"body must include at least one of: {', '.join(_METADATA_FIELDS)}"}, status=400
         )
 
-    controller.library.save_metadata(movie_id, **fields)
+    await run_io(controller.library.save_metadata, movie_id, **fields)
     return web.json_response(_movie_payload(controller, movie))
 
 
@@ -235,6 +238,7 @@ async def _get_status(request: web.Request) -> web.Response:
         "movie_id": state.movie_id,
         "position_seconds": state.position_seconds,
         "syncing_movie_title": controller.currently_syncing_movie_title,
+        "update_status": controller.update_status,
         "cpu_temperature_celsius": cpu_temperature_celsius(),
         "under_voltage": throttle.under_voltage if throttle else None,
         "throttled": throttle.throttled if throttle else None,

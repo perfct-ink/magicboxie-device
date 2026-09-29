@@ -32,6 +32,7 @@ class MagicBoxieService(Service):
         self._transcode_status_bytes = protocol.encode_transcode_status(None)
         self._poll_task: Optional[asyncio.Task] = None
         self._library_bytes = b""
+        self._update_status_bytes = b""
 
     def start_status_polling(self) -> None:
         self._poll_task = asyncio.create_task(self._poll_status_loop())
@@ -45,6 +46,7 @@ class MagicBoxieService(Service):
             await asyncio.sleep(STATUS_POLL_INTERVAL_SECONDS)
             await self._refresh_status()
             self._refresh_transcode_status()
+            self._refresh_update_status()
 
     async def _refresh_status(self) -> None:
         state = await self._controller.refresh_status()
@@ -61,6 +63,16 @@ class MagicBoxieService(Service):
         if new_bytes != self._transcode_status_bytes:
             self._transcode_status_bytes = new_bytes
             self.transcode_status.changed(new_bytes)
+
+    def _refresh_update_status(self) -> None:
+        value = (self._controller.update_status or "").encode("utf-8")
+        if value != self._update_status_bytes:
+            self._update_status_bytes = value
+            self.update_status.changed(value)
+
+    @characteristic(protocol.UPDATE_STATUS_CHARACTERISTIC_UUID, CharFlags.READ | CharFlags.NOTIFY)
+    def update_status(self, options):
+        return (self._controller.update_status or "").encode("utf-8")[options.offset:]
 
     async def _handle_and_refresh(self, cmd: protocol.Command) -> None:
         await self._controller.handle_command(cmd)

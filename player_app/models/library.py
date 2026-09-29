@@ -1,10 +1,15 @@
 """Scans a directory of video files and exposes them via protocol.Movie."""
 from __future__ import annotations
 
-import json
 import logging
 import subprocess
 import zlib
+import threading
+import time
+
+from PIL import Image
+
+from ..storage import atomic_write, publish_file, read_dict, write_json
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -43,6 +48,7 @@ class MovieLibrary:
         # The movies directory is typically mounted read-only, so thumbnails
         # (and phone-supplied metadata) are cached in a separate, writable
         # location instead of alongside it.
+        self._scan_lock = threading.RLock()
         self.root = root
         self._movies: List[Movie] = []
         self._paths: Dict[int, Path] = {}
@@ -63,16 +69,35 @@ class MovieLibrary:
         # that filename, full stop - not just usually stable.
         self._id_by_filename: Dict[str, int] = {}
 
-    def scan(self) -> List[Movie]:
+    def scan(self, *, fast: bool = False) -> List[Movie]:
+        with self._scan_lock:
+            return self._scan(fast=fast)
+
+    def cleanup_partial_files(self) -> None:
+        """Only called before workers start; never remove an active download."""
+        for directory in (self.root, self._thumbnail_dir, self._transcode_dir):
+            if not directory.is_dir():
+                continue
+            for path in directory.iterdir():
+                if path.is_file() and (path.name.endswith(".partial") or ".partial." in path.name):
+                    try:
+                        path.unlink()
+                    except OSError:
+                        logger.warning("Cannot remove interrupted write %s", path)
+
+    def _scan(self, *, fast: bool) -> List[Movie]:
         """Reads the movies directory from the filesystem and caches the
         result (title, duration, thumbnail, metadata) in memory for fast
         lookups."""
         self._thumbnail_dir.mkdir(parents=True, exist_ok=True)
         self._id_by_filename = self._load_id_map()
+        cache_path = self._thumbnail_dir / "scan_cache.json"
+        cache = read_dict(cache_path)
+        updated_cache = {}
 
         files = sorted(
             p for p in self.root.iterdir()
-            if p.is_file() and p.suffix.lower() in VIDEO_EXTENSIONS
+            if p.is_file() and p.suffix.lower() in VIDEO_EXTENSIONS and ".partial." not in p.name and not p.name.startswith(".")
         )
 
         movies = []
@@ -88,12 +113,27 @@ class MovieLibrary:
                 self._id_by_filename[path.name] = movie_id
                 taken_ids.add(movie_id)
 
-            movies.append(
-                Movie(id=movie_id, title=path.stem, duration_seconds=self._probe_duration(path))
-            )
+            stat = path.stat()
+            signature = [stat.st_size, stat.st_mtime_ns]
+            cached = cache.get(path.name, {})
+            valid_cache = (isinstance(cached, dict) and cached.get("signature") == signature
+                           and type(cached.get("duration")) is int and cached["duration"] > 0)
+            if stat.st_size == 0:
+                logger.warning("Quarantining empty movie %s", path)
+                try:
+                    path.rename(path.with_name(f"{path.name}.{time.time_ns()}.corrupt"))
+                except OSError:
+                    logger.warning("Could not quarantine empty movie %s", path)
+                continue
+            duration = cached["duration"] if valid_cache else (0 if fast else self._probe_duration(path))
+            if duration > 0:
+                updated_cache[path.name] = {"signature": signature, "duration": duration}
+            movies.append(Movie(id=movie_id, title=path.stem, duration_seconds=duration))
             paths[movie_id] = path
 
-            thumbnail = self._ensure_thumbnail(movie_id, path)
+            thumbnail = self._thumbnail_dir / f"{movie_id}.jpg"
+            if not self._valid_thumbnail(thumbnail):
+                thumbnail = None if fast else self._ensure_thumbnail(movie_id, path)
             if thumbnail is not None:
                 thumbnail_paths[movie_id] = thumbnail
 
@@ -104,21 +144,23 @@ class MovieLibrary:
         self._thumbnail_paths = thumbnail_paths
         self._metadata = metadata
         self._save_id_map()
+        write_json(cache_path, updated_cache)
         logger.info("Scanned %d movie(s) in %s", len(movies), self.root)
         return movies
 
     def _load_id_map(self) -> Dict[str, int]:
-        if not self._id_map_path.is_file():
-            return {}
-        try:
-            return json.loads(self._id_map_path.read_text())
-        except (OSError, ValueError):
-            logger.warning("Failed to read %s - starting a fresh movie id map", self._id_map_path)
-            return {}
+        raw = read_dict(self._id_map_path)
+        result = {}
+        taken = set()
+        for name, value in raw.items():
+            if isinstance(name, str) and type(value) is int and 0 <= value < _MOVIE_ID_SPACE and value not in taken:
+                result[name] = value
+                taken.add(value)
+        return result
 
     def _save_id_map(self) -> None:
         try:
-            self._id_map_path.write_text(json.dumps(self._id_by_filename))
+            write_json(self._id_map_path, self._id_by_filename)
         except OSError:
             logger.warning("Failed to persist %s - ids may not survive a restart", self._id_map_path)
 
@@ -143,6 +185,21 @@ class MovieLibrary:
         transcoded = self.transcode_path_for(movie_id)
         return transcoded if transcoded.exists() else self._paths[movie_id]
 
+    def quarantine_failed_playback(self, movie_id: int) -> bool:
+        """Preserve rejected media outside the library; retry originals after a bad encode."""
+        with self._scan_lock:
+            path = self.playable_path_for(movie_id)
+            optimized = path == self.transcode_path_for(movie_id)
+            try:
+                path.rename(path.with_name(f"{path.name}.{time.time_ns()}.corrupt"))
+            except OSError:
+                logger.warning("Could not quarantine %s", path)
+                return False
+            if not optimized:
+                self._movies = [movie for movie in self._movies if movie.id != movie_id]
+                self._paths.pop(movie_id, None)
+            return optimized
+
     def thumbnail_path_for(self, movie_id: int) -> Optional[Path]:
         return self._thumbnail_paths.get(movie_id)
 
@@ -152,7 +209,7 @@ class MovieLibrary:
         it instead of the local ffmpeg frame grab."""
         self._thumbnail_dir.mkdir(parents=True, exist_ok=True)
         thumbnail_path = self._thumbnail_dir / f"{movie_id}.jpg"
-        thumbnail_path.write_bytes(data)
+        atomic_write(thumbnail_path, data)
         self._thumbnail_paths[movie_id] = thumbnail_path
 
     def metadata_for(self, movie_id: int) -> dict:
@@ -190,7 +247,7 @@ class MovieLibrary:
         updated = {**self._metadata.get(movie_id, {}), **fields}
         self._metadata[movie_id] = updated
         metadata_path = self._thumbnail_dir / f"{movie_id}.json"
-        metadata_path.write_text(json.dumps(updated))
+        write_json(metadata_path, updated)
         return updated
 
     @staticmethod
@@ -211,19 +268,24 @@ class MovieLibrary:
         share an id.
         """
         movie_id = zlib.crc32(path.name.encode("utf-8")) % _MOVIE_ID_SPACE
+        if len(taken) >= _MOVIE_ID_SPACE:
+            raise ValueError("Movie ID space exhausted")
         while movie_id in taken:
             movie_id = (movie_id + 1) % _MOVIE_ID_SPACE
         return movie_id
 
     def _load_metadata(self, movie_id: int) -> dict:
         metadata_path = self._thumbnail_dir / f"{movie_id}.json"
-        if not metadata_path.is_file():
-            return {}
+        return read_dict(metadata_path)
+
+    @staticmethod
+    def _valid_thumbnail(path: Path) -> bool:
         try:
-            return json.loads(metadata_path.read_text())
-        except (OSError, ValueError) as exc:
-            logger.warning("Could not read metadata for movie %d: %s", movie_id, exc)
-            return {}
+            with Image.open(path) as image:
+                image.verify()
+            return True
+        except (OSError, ValueError):
+            return False
 
     @staticmethod
     def _probe_duration(path: Path) -> int:
@@ -241,14 +303,15 @@ class MovieLibrary:
                 check=True,
             )
             return int(float(result.stdout.strip()))
-        except (subprocess.SubprocessError, ValueError, FileNotFoundError) as exc:
+        except (subprocess.SubprocessError, ValueError, OverflowError, OSError) as exc:
             logger.warning("ffprobe failed for %s: %s", path, exc)
             return 0
 
     def _ensure_thumbnail(self, movie_id: int, path: Path) -> Optional[Path]:
         thumbnail_path = self._thumbnail_dir / f"{movie_id}.jpg"
-        if thumbnail_path.exists():
+        if self._valid_thumbnail(thumbnail_path):
             return thumbnail_path
+        temporary = thumbnail_path.with_suffix(".partial.jpg")
         try:
             subprocess.run(
                 [
@@ -257,13 +320,18 @@ class MovieLibrary:
                     "-i", str(path),
                     "-frames:v", "1",
                     "-vf", f"scale={THUMBNAIL_WIDTH}:-1",
-                    str(thumbnail_path),
+                    str(temporary),
                 ],
                 capture_output=True,
                 timeout=30,
                 check=True,
             )
+            if not self._valid_thumbnail(temporary):
+                return None
+            publish_file(temporary, thumbnail_path)
             return thumbnail_path
-        except (subprocess.SubprocessError, FileNotFoundError) as exc:
+        except (subprocess.SubprocessError, OSError) as exc:
             logger.warning("Thumbnail generation failed for %s: %s", path, exc)
             return None
+        finally:
+            temporary.unlink(missing_ok=True)

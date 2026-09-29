@@ -106,3 +106,19 @@ make dev
 
 This builds the development image, seeds sample movies when needed, and starts
 the HTTP transport. Run the test suite with `make test`.
+
+Startup and recovery:
+
+- Startup lists movies without running ffprobe or ffmpeg. Durations are cached by file size and modification time; missing metadata and thumbnails are filled in after playback stops.
+- Downloads, uploads, thumbnails, metadata, and playback state use temporary files and atomic replacement. Completed writes are synced to disk. Startup removes abandoned partial files.
+- Playback failures quarantine the rejected file with a `.corrupt` suffix. A failed optimized copy falls back to the original; a failed original is excluded so another movie can play. Quarantined files remain available for inspection.
+- Each movie keeps its own resume position, checkpointed every five seconds and saved immediately on Stop and movie changes. Natural completion clears that movie's position. Startup still chooses randomly and honors input received during startup.
+- HTTP `update_status` and BLE characteristic `...000000000009` report a UTF-8 update message (empty BLE value / null HTTP field when inactive). Software updates wait for the current movie to finish and suppress autoplay until installation ends. The iOS app displays this over either transport.
+- The updater records the successfully installed revision separately from Git HEAD, so an interrupted installation is retried. Its live status belongs to the updater process and expires rather than leaving a permanent updating indication after a crash.
+
+Background scheduling:
+
+- Player/HDMI initialization overlaps partial-file recovery and the fast library scan. Initial screen rendering runs alongside control-service startup.
+- Screen rendering, durable playback saves, upload/download writes, metadata writes, and completed-file publication run in worker threads. Writes still finish durably before the corresponding operation succeeds; cancellation waits for an active disk write before cleanup.
+- Home-server registration continues during playback. Large downloads and transcoding remain idle-only to protect playback on the Pi Zero's single core.
+- Pending background tasks are cancelled and joined on shutdown. A completed background screen render cannot replace a movie selected while it was rendering.

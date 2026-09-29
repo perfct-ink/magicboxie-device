@@ -95,3 +95,12 @@ def test_wifi_provision_write_drops_malformed_payload_without_scheduling_anythin
     with patch("player_app.views.ble_service.apply_wifi_credentials", new=AsyncMock()) as mock_apply:
         _wifi_provision_setter(service, b"", _FakeOptions(offset=0))
     mock_apply.assert_not_called()
+
+
+def test_update_status_reports_and_clears_message():
+    service = _make_service([])
+    getter = MagicBoxieService.update_status.getter_func
+    service._controller.update_status = "Updating device software"
+    assert getter(service, _FakeOptions(0)) == b"Updating device software"
+    service._controller.update_status = None
+    assert getter(service, _FakeOptions(0)) == b""

@@ -27,6 +27,9 @@ API_VERSION_CHARACTERISTIC_UUID = "3e2c1a00-3b42-4b7e-9c3e-000000000007"
 # BLE, without needing SSH access - see views/wifi_provisioning.py.
 WIFI_PROVISION_CHARACTERISTIC_UUID = "3e2c1a00-3b42-4b7e-9c3e-000000000008"
 
+# UTF-8 update message, empty when no update is active. Additive for older apps.
+UPDATE_STATUS_CHARACTERISTIC_UUID = "3e2c1a00-3b42-4b7e-9c3e-000000000009"
+
 # iOS long-reads cap out at 512 bytes (BLE ATT maximum attribute value length).
 MAX_CHARACTERISTIC_BYTES = 512
 

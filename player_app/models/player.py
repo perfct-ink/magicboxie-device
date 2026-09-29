@@ -41,6 +41,8 @@ _PAUSE_ICON_ASS = (
 
 class MpvController:
     def __init__(self, socket_path: str = "/tmp/magicboxie-mpv.sock", extra_args: Optional[List[str]] = None):
+        self.media_failed = False
+        self.failed = False
         self.finished = False
         self._loading = False
         self._socket_path = socket_path
@@ -52,6 +54,10 @@ class MpvController:
         self._pending: Dict[int, "asyncio.Future"] = {}
         self._listen_task: Optional[asyncio.Task] = None
         self._stderr_task: Optional[asyncio.Task] = None
+
+    @property
+    def loading(self) -> bool:
+        return self._loading
 
     async def start(self) -> None:
         socket_path = Path(self._socket_path)
@@ -121,6 +127,9 @@ class MpvController:
                 message.get("event") == "end-file" and message.get("reason") in ("eof", "error")
             ):
                 self._loading = False
+            if message.get("event") == "end-file" and message.get("reason") == "error":
+                self.media_failed = True
+                self.failed = True
             if message.get("event") == "end-file" and message.get("reason") == "eof":
                 self.finished = True
             request_id = message.get("request_id")
@@ -169,11 +178,14 @@ class MpvController:
         # integer <index> and reject the whole command with "invalid
         # parameter", silently. index is irrelevant for "replace" but must
         # still be passed positionally to reach options.
+        self.media_failed = False
+        self.failed = False
         self.finished = False
         self._loading = True
         options = f"start={start_seconds},pause={'yes' if paused else 'no'}"
         response = await self._command("loadfile", str(path), "replace", 0, options)
         if response.get("error") != "success":
+            self.failed = True
             self._loading = False
 
     async def show_image(self, path: Path) -> None:
@@ -183,6 +195,8 @@ class MpvController:
         otherwise drop it back to idle almost immediately. Options is the
         4th positional arg (see load()'s comment) - index 0 in between is
         required to reach it, not optional."""
+        self.media_failed = False
+        self.failed = False
         self.finished = False
         await self._command("loadfile", str(path), "replace", 0, "image-display-duration=inf")
 
@@ -193,6 +207,8 @@ class MpvController:
         await self._command("set_property", "pause", True)
 
     async def stop(self) -> None:
+        self.media_failed = False
+        self.failed = False
         self.finished = False
         await self._command("stop")
 

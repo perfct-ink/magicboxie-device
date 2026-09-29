@@ -25,6 +25,8 @@ from typing import List
 from .controllers.playback_controller import PlaybackController
 from .models.library import MovieLibrary
 from .models.player import MpvController
+from .update_status import read_status
+from .storage import run_io
 from .util import local_ip, sleep_unless_stopped
 
 logger = logging.getLogger(__name__)
@@ -88,38 +90,65 @@ async def _run() -> None:
     library = MovieLibrary(MOVIES_DIR, thumbnail_dir=THUMBNAIL_DIR, transcode_dir=TRANSCODE_DIR)
 
     player = MpvController(extra_args=_mpv_output_args())
-    await player.start()
-
-    controller = PlaybackController(library, player, state_path=PLAYBACK_STATE_PATH)
-    # Resting state until something's selected to play - the screen should
-    # never just be black/whatever mpv's own idle window looks like. Shows
-    # empty for now; library.scan() runs concurrently below (_run_library_scan)
-    # rather than blocking here, since probing a real movie library can take
-    # minutes on a Pi Zero W and BLE/mDNS/HTTP registration shouldn't wait on it.
-    await controller.show_idle_screen()
-
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, stop_event.set)
 
+    tasks = []
+    workers_done = None
+    stopped = None
     try:
-        tasks = [
+        await _prepare_startup(library, player)
+        controller = await run_io(PlaybackController, library, player, state_path=PLAYBACK_STATE_PATH)
+        if stop_event.is_set():
+            return
+        workers = [
             _run_http(controller, stop_event),
             _run_keyboard(controller, stop_event),
             _run_mdns(stop_event),
-            _run_library_scan(controller, stop_event),
+            controller.show_idle_screen(),
+            _run_library_scan(controller, stop_event, prepared=True),
             _run_playback(controller, stop_event),
             _run_transcode(controller, stop_event),
             _run_idle_dim(controller, stop_event),
         ]
         if TRANSPORT != "http":
-            tasks.append(_run_ble(controller, stop_event))
+            workers.append(_run_ble(controller, stop_event))
         if HOME_SERVER_URL:
-            tasks.append(_run_home_sync(controller, stop_event))
+            workers.append(_run_home_sync(controller, stop_event))
+        tasks = [asyncio.create_task(worker) for worker in workers]
+        workers_done = asyncio.gather(*tasks)
+        stopped = asyncio.create_task(stop_event.wait())
+        done, _ = await asyncio.wait([workers_done, stopped], return_when=asyncio.FIRST_COMPLETED)
+        if workers_done in done:
+            workers_done.result()
+    finally:
+        stop_event.set()
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        if workers_done is not None:
+            await asyncio.gather(workers_done, return_exceptions=True)
+        if stopped is not None:
+            stopped.cancel()
+            await asyncio.gather(stopped, return_exceptions=True)
+        await player.stop_process()
+
+
+async def _prepare_startup(library: MovieLibrary, player: MpvController) -> None:
+    """Overlap mpv/HDMI setup with recovery and the lightweight library scan."""
+    async def prepare_library():
+        await run_io(library.cleanup_partial_files)
+        await run_io(library.scan, fast=True)
+
+    tasks = [asyncio.create_task(player.start()), asyncio.create_task(prepare_library())]
+    try:
         await asyncio.gather(*tasks)
     finally:
-        await player.stop_process()
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 async def _run_http(controller: PlaybackController, stop_event: asyncio.Event) -> None:
@@ -165,13 +194,24 @@ async def _run_mdns(stop_event: asyncio.Event) -> None:
             await advertiser.stop()
 
 
-async def _run_library_scan(controller: PlaybackController, stop_event: asyncio.Event) -> None:
+async def _run_library_scan(controller: PlaybackController, stop_event: asyncio.Event, *, prepared: bool = False) -> None:
     """Scan without blocking transports, then autoplay unless input arrived."""
-    loop = asyncio.get_running_loop()
-    await loop.run_in_executor(None, controller.library.scan)
+    if not prepared:
+        await run_io(controller.library.scan, fast=True)
     if stop_event.is_set():
         return
-    await controller.start_random_playback()
+    while not stop_event.is_set() and await run_io(read_status) is not None:
+        await sleep_unless_stopped(stop_event, 1)
+    if not stop_event.is_set():
+        await controller.start_random_playback()
+    # Probes and frame grabs can wait until the user stops playback.
+    while not stop_event.is_set():
+        if controller.is_idle:
+            await run_io(controller.library.scan)
+            if controller.is_idle and not stop_event.is_set():
+                await controller.show_idle_screen()
+            return
+        await sleep_unless_stopped(stop_event, 5)
 
 
 async def _run_playback(controller: PlaybackController, stop_event: asyncio.Event) -> None:
@@ -329,19 +369,21 @@ async def _run_home_sync(controller: PlaybackController, stop_event: asyncio.Eve
     expected and just gets logged - not treated as fatal."""
     from .views.home_sync_service import HomeServerSync
 
+    redraw_requested = asyncio.Event()
+
+    async def redraw_idle_screen():
+        while True:
+            await redraw_requested.wait()
+            redraw_requested.clear()
+            try:
+                await controller.show_idle_screen()
+            except Exception:
+                logger.exception("Idle screen refresh failed")
+
     def set_syncing_title(title: str | None) -> None:
         controller.currently_syncing_movie_title = title
-        # Refreshes the on-screen sync badge (see idle_screen.py) the
-        # instant a download starts/finishes, rather than waiting for the
-        # idle screen to happen to be redrawn for some unrelated reason.
-        # Guarded on is_idle: HomeServerSync itself won't be downloading
-        # anything while something's playing (see is_idle= below), but this
-        # callback fires with title=None on every download's `finally`
-        # regardless of why it ended - showing the idle screen here without
-        # the guard could otherwise stomp on a movie that's actually on
-        # screen right now.
         if controller.is_idle:
-            asyncio.create_task(controller.show_idle_screen())
+            redraw_requested.set()
 
     sync = HomeServerSync(
         controller.library,
@@ -350,12 +392,17 @@ async def _run_home_sync(controller: PlaybackController, stop_event: asyncio.Eve
         on_progress=set_syncing_title,
         is_idle=lambda: controller.is_idle,
     )
-    while not stop_event.is_set():
-        try:
-            await sync.check_in()
-        except Exception:
-            logger.exception("Home server check-in failed unexpectedly")
-        await sleep_unless_stopped(stop_event, HOME_SERVER_CHECKIN_SECONDS)
+    redraw_task = asyncio.create_task(redraw_idle_screen())
+    try:
+        while not stop_event.is_set():
+            try:
+                await sync.check_in()
+            except Exception:
+                logger.exception("Home server check-in failed unexpectedly")
+            await sleep_unless_stopped(stop_event, HOME_SERVER_CHECKIN_SECONDS)
+    finally:
+        redraw_task.cancel()
+        await asyncio.gather(redraw_task, return_exceptions=True)
 
 
 def run() -> None:

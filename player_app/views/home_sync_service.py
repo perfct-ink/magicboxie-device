@@ -23,6 +23,7 @@ from typing import Callable, List, Optional
 
 import aiohttp
 
+from ..storage import publish_file, run_io
 from ..models.library import VIDEO_EXTENSIONS, MovieLibrary
 
 logger = logging.getLogger(__name__)
@@ -53,13 +54,8 @@ class HomeServerSync:
         # PlaybackController for web_service.py's /api/status to report,
         # without this class needing to know PlaybackController exists.
         self._on_progress = on_progress or (lambda _title: None)
-        # Same hub pattern as on_progress above - checked before starting a
-        # check-in at all (see check_in()) so this never competes with
-        # playback decode for network/disk I/O or (via the library.scan()
-        # at the end) CPU, on a device with only one core to share between
-        # them. Movies already downloaded are never abandoned mid-file for
-        # this - see the _pending_metadata handling below for what happens
-        # if playback starts partway through a cycle instead of before one.
+        # Keep registration alive while playing, but defer downloads and
+        # probing until idle so they do not compete with video decoding.
         self._is_idle = is_idle
         # Movies downloaded in an earlier check-in whose library.scan() (and
         # metadata save) got deferred because playback started before this
@@ -71,15 +67,15 @@ class HomeServerSync:
         self._pending_metadata: List[dict] = []
 
     async def check_in(self) -> None:
-        if not self._is_idle():
-            logger.info("Home server check-in: skipped while playback is active")
-            return
-
         async with aiohttp.ClientSession() as session:
             try:
                 remote_movies = await self._register_and_list_movies(session)
             except (aiohttp.ClientError, TimeoutError) as exc:
                 logger.info("Home server check-in: couldn't list movies (%s)", exc)
+                return
+
+            # Registration stays live during playback; defer expensive transfers.
+            if not self._is_idle():
                 return
 
             existing_titles = {movie.title for movie in self._library.movies}
@@ -130,9 +126,9 @@ class HomeServerSync:
                 logger.info("Home server check-in: deferring library scan until playback stops")
                 return
 
-            self._library.scan()
+            await run_io(self._library.scan)
             for remote_movie in self._pending_metadata:
-                self._save_metadata(remote_movie)
+                await run_io(self._save_metadata, remote_movie)
             self._pending_metadata = []
 
     async def _register_and_list_movies(self, session: aiohttp.ClientSession) -> List[dict]:
@@ -190,23 +186,28 @@ class HomeServerSync:
             return False
 
         logger.info("Home server check-in: downloading %r", movie["Name"])
+        temporary = dest_path.with_name("." + dest_path.name + ".partial")
         try:
             async with session.get(
                 f"{self._base_url}/Videos/{movie['Id']}/stream",
                 params={"static": "true"},
                 headers=headers,
-                timeout=aiohttp.ClientTimeout(total=None),
+                timeout=aiohttp.ClientTimeout(total=None, sock_connect=10, sock_read=60),
             ) as resp:
                 if resp.status != 200:
                     logger.warning("Home server check-in: download of %r failed (HTTP %d)", movie["Name"], resp.status)
                     return False
-                with dest_path.open("wb") as f:
+                with temporary.open("wb") as f:
                     async for chunk in resp.content.iter_chunked(_DOWNLOAD_CHUNK_BYTES):
-                        f.write(chunk)
+                        await run_io(f.write, chunk)
+                if temporary.stat().st_size == 0:
+                    return False
+                await run_io(publish_file, temporary, dest_path)
         except (aiohttp.ClientError, TimeoutError, OSError) as exc:
             logger.warning("Home server check-in: download of %r failed (%s)", movie["Name"], exc)
-            dest_path.unlink(missing_ok=True)
             return False
+        finally:
+            temporary.unlink(missing_ok=True)
         return True
 
     def _save_metadata(self, remote_movie: dict) -> None:

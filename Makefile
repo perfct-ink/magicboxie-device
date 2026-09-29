@@ -219,20 +219,26 @@ pi-self-update:
 	@if [ -n "$$(git status --porcelain)" ]; then \
 		echo "pi-self-update: local changes present in $(CURDIR) - skipping"; \
 		exit 0; \
-	fi
-	@before="$$(git rev-parse HEAD)"; \
+	fi; \
+	before="$$(git rev-parse HEAD)"; \
 	if ! git pull --ff-only; then \
 		echo "pi-self-update: git pull failed (no internet?) - will retry on the next scheduled run"; \
 		exit 0; \
 	fi; \
 	after="$$(git rev-parse HEAD)"; \
-	if [ "$$before" = "$$after" ]; then \
+	installed="$$(cat .git/magicboxie-installed-revision 2>/dev/null)"; \
+	if [ "$$installed" = "$$after" ]; then \
 		echo "pi-self-update: already up to date"; \
 	else \
 		echo "pi-self-update: $$before -> $$after, waiting for playback to be idle before redeploying"; \
-		$(MAKE) pi-wait-until-idle; \
+		python3 -m player_app.update_status waiting $$$$; \
+		trap 'python3 -m player_app.update_status clear $$$$' EXIT HUP INT TERM; \
+		$(MAKE) pi-wait-until-idle || exit $$?; \
 		echo "pi-self-update: idle now, redeploying"; \
-		$(MAKE) pi-redeploy; \
+		python3 -m player_app.update_status installing $$$$; \
+		sleep 2; \
+		$(MAKE) pi-redeploy || exit $$?; \
+		python3 -c 'import sys; from pathlib import Path; from player_app.storage import atomic_write; atomic_write(Path(".git/magicboxie-installed-revision"), sys.argv[1].encode())' "$$after"; \
 	fi
 
 # Renders and enables magicboxie-self-update's service+timer (daily git

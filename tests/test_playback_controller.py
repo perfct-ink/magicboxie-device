@@ -419,3 +419,100 @@ def test_mpv_marks_only_natural_end_as_finished():
     assert asyncio.run(scenario("eof"))
     assert not asyncio.run(scenario("stop"))
     assert not asyncio.run(scenario("error"))
+
+
+def test_stop_remembers_position_across_restart(tmp_path):
+    async def scenario():
+        state_path = tmp_path / "state.json"
+        player = FakeMpv()
+        controller = PlaybackController(FakeLibrary(), player, state_path)
+        await controller.handle_command(Command(Opcode.SELECT_MOVIE, 0))
+        player.position = 37
+        await controller.handle_command(Command(Opcode.STOP))
+        reloaded = PlaybackController(FakeLibrary(), player, state_path)
+        await reloaded.handle_command(Command(Opcode.SELECT_MOVIE, 0))
+        assert player.position == 37
+    asyncio.run(scenario())
+
+
+def test_finish_clears_bookmark_and_bad_movie_is_not_retried(tmp_path):
+    async def scenario():
+        player = FakeMpv()
+        controller = PlaybackController(FakeLibrary(), player, tmp_path / "state.json")
+        await controller.handle_command(Command(Opcode.SELECT_MOVIE, 0))
+        player.position = 30
+        await controller.refresh_status()
+        player.finished = True
+        await controller.refresh_status()
+        assert controller._positions["0"] == 0
+        player.failed = True
+        await controller.refresh_status()
+        assert player.loaded_path == FakeLibrary().path_for(0)
+        player.finished = True
+        await controller.refresh_status()
+        assert controller.is_idle
+    asyncio.run(scenario())
+
+
+def test_corrupt_positions_are_ignored(tmp_path):
+    (tmp_path / "movie_positions.json").write_text('{"0": -9, "1": "bad"}')
+    async def scenario():
+        player = FakeMpv()
+        controller = PlaybackController(FakeLibrary(), player, tmp_path / "state.json")
+        await controller.handle_command(Command(Opcode.SELECT_MOVIE, 0))
+        assert player.position == 0
+    asyncio.run(scenario())
+
+
+def test_update_waits_for_movie_end(monkeypatch):
+    async def scenario():
+        player = FakeMpv()
+        controller = PlaybackController(FakeLibrary(), player)
+        await controller.handle_command(Command(Opcode.SELECT_MOVIE, 0))
+        monkeypatch.setattr("player_app.controllers.playback_controller.read_status", lambda: "waiting")
+        assert (await controller.refresh_status()).movie_id == 0
+        player.finished = True
+        assert (await controller.refresh_status()).status == PlaybackStatus.STOPPED
+    asyncio.run(scenario())
+
+
+def test_loading_does_not_erase_saved_position(tmp_path):
+    async def scenario():
+        player = FakeMpv()
+        controller = PlaybackController(FakeLibrary(), player, tmp_path / "state.json")
+        await controller.handle_command(Command(Opcode.SELECT_MOVIE, 0))
+        player.position = 37
+        await controller.handle_command(Command(Opcode.STOP))
+        await controller.handle_command(Command(Opcode.SELECT_MOVIE, 0))
+        player.loading = True
+        player.position = 0
+        state = await controller.refresh_status()
+        assert state.position_seconds == 37
+        assert controller._positions["0"] == 37
+    asyncio.run(scenario())
+
+
+def test_periodic_saves_every_five_seconds_with_live_status(tmp_path):
+    async def scenario():
+        player = FakeMpv()
+        state_path = tmp_path / "state.json"
+        controller = PlaybackController(FakeLibrary(), player, state_path)
+        await controller.handle_command(Command(Opcode.SELECT_MOVIE, 0))
+        with patch("player_app.controllers.playback_controller.time.monotonic", return_value=100) as clock:
+            player.position = 10
+            await controller.refresh_status()
+            for seconds in (1, 2, 3, 4):
+                clock.return_value = 100 + seconds
+                player.position = 10 + seconds
+                assert (await controller.refresh_status()).position_seconds == 10 + seconds
+                assert json.loads(state_path.read_text())["position_seconds"] == 10
+                assert json.loads((tmp_path / "movie_positions.json").read_text())["0"] == 10
+            clock.return_value = 105
+            player.position = 15
+            await controller.refresh_status()
+            assert json.loads(state_path.read_text())["position_seconds"] == 15
+            clock.return_value = 106
+            player.position = 16
+            await controller.handle_command(Command(Opcode.STOP))
+            assert json.loads((tmp_path / "movie_positions.json").read_text())["0"] == 16
+    asyncio.run(scenario())

@@ -237,20 +237,17 @@ def test_check_in_clears_progress_even_when_a_download_fails(tmp_path):
     assert progress_calls == ["Alpha", None]
 
 
-def test_check_in_does_nothing_while_playback_is_active(tmp_path):
-    """No HTTP calls at all while something's playing, not even to list
-    what's available - a device with only one core shouldn't spend any of
-    it (network stack, disk I/O for a download, or the ffprobe/ffmpeg calls
-    in the library.scan() a download would trigger) competing with
-    decode."""
+def test_check_in_registers_but_does_not_download_while_playing(tmp_path):
     library = _library(tmp_path)
     sync = HomeServerSync(library, BASE_URL, "secret", is_idle=lambda: False)
-
     with aioresponses() as mocked:
-        # No mocks registered at all - any HTTP call at all fails the test.
+        mocked.post(f"{BASE_URL}/devices/register", payload={"items": [
+            {"id": "1", "name": "Alpha", "filename": "alpha.mp4"}
+        ]})
         asyncio.run(sync.check_in())
-
+        assert sum(len(calls) for calls in mocked.requests.values()) == 1
     assert library.movies == []
+    assert list(library.root.iterdir()) == []
 
 
 def test_check_in_stops_starting_new_downloads_once_playback_begins(tmp_path):

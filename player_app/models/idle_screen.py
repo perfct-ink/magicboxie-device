@@ -6,10 +6,12 @@ ordinary (very long-lived) "file" whenever the device needs to show it.
 """
 from __future__ import annotations
 
+from io import BytesIO
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
+from ..storage import atomic_write
 from .library import MovieLibrary
 
 IDLE_SCREEN_PATH = Path("/tmp/magicboxie-idle-screen.png")
@@ -98,8 +100,9 @@ def render_idle_screen(
     if syncing_title:
         _draw_sync_badge(canvas, draw, syncing_title)
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    canvas.save(output_path)
+    image_bytes = BytesIO()
+    canvas.save(image_bytes, format="PNG")
+    atomic_write(output_path, image_bytes.getvalue())
     return output_path
 
 

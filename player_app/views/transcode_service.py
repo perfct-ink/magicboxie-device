@@ -10,6 +10,7 @@ import asyncio
 import logging
 from typing import Optional
 
+from ..storage import publish_file, run_io
 from ..controllers.playback_controller import PlaybackController
 from ..models.protocol import Movie
 from ..util import sleep_unless_stopped
@@ -104,7 +105,7 @@ class TranscodeService:
                     continue
 
             if process.returncode == 0:
-                tmp_dest.rename(dest)
+                await run_io(publish_file, tmp_dest, dest)
                 logger.info("Finished transcoding %s", source.name)
                 return
 
