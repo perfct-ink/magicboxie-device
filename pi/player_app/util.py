@@ -1,5 +1,5 @@
 """Small helpers shared across main.py's orchestration loops and the
-background views/*_service.py workers."""
+background services/*_service.py workers."""
 from __future__ import annotations
 
 import asyncio

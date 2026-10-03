@@ -4,7 +4,7 @@ import time
 from fakes import FakeLibrary, FakeMpv
 
 from player_app.controllers.playback_controller import PlaybackController
-from player_app.views.idle_dim_service import IDLE_DIM_PERCENT, IDLE_DIM_TIMEOUT_SECONDS, IdleDimService
+from player_app.services.idle_dim_service import IDLE_DIM_PERCENT, IDLE_DIM_TIMEOUT_SECONDS, IdleDimService
 
 
 def test_dims_when_idle_past_the_timeout():

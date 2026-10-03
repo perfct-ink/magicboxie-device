@@ -3,7 +3,7 @@ import asyncio
 from aioresponses import aioresponses
 
 from player_app.models.library import MovieLibrary
-from player_app.views.home_sync_service import HomeServerSync
+from player_app.services.home_sync_service import HomeServerSync
 
 BASE_URL = "http://home.example.com:8080"
 

@@ -4,13 +4,13 @@ from unittest.mock import AsyncMock, patch
 from fakes import FakeLibrary, FakeMpv
 
 from player_app.controllers.playback_controller import PlaybackController
-from player_app.views.transcode_service import TranscodeService
+from player_app.services.transcode_service import TranscodeService
 
 # Real ffmpeg subprocess creation is patched out so these tests don't depend
 # on a real ffmpeg binary, real video files, or real encode time - matching
 # how test_mdns_service.py patches out AsyncZeroconf rather than opening
 # real sockets.
-_PATCH_TARGET = "player_app.views.transcode_service.asyncio.create_subprocess_exec"
+_PATCH_TARGET = "player_app.services.transcode_service.asyncio.create_subprocess_exec"
 
 
 class FakeProcess:
@@ -171,7 +171,7 @@ def test_transcode_stops_and_cleans_up_once_playback_starts(tmp_path):
             return process
 
         with patch(_PATCH_TARGET, side_effect=fake_exec), \
-                patch("player_app.views.transcode_service.PLAYBACK_CHECK_INTERVAL_SECONDS", 0.01):
+                patch("player_app.services.transcode_service.PLAYBACK_CHECK_INTERVAL_SECONDS", 0.01):
             transcode_task = asyncio.create_task(service._transcode(movie_id=0))
             await asyncio.sleep(0)  # let it start and enter the wait loop
             controller._current_movie_id = 5  # playback "starts"

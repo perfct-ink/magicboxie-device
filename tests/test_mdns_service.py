@@ -1,13 +1,13 @@
 import asyncio
 from unittest.mock import AsyncMock, patch
 
-from player_app.views.mdns_service import SERVICE_TYPE, MdnsAdvertiser
+from player_app.services.mdns_service import SERVICE_TYPE, MdnsAdvertiser
 
 # Real AsyncZeroconf opens real multicast sockets, which is both unnecessary
 # for what this module needs to guarantee and unreliable in CI (the
 # Makefile's containerized `test` target doesn't run with host networking).
 # Patching it out keeps this a pure unit test of MdnsAdvertiser's wiring.
-_PATCH_TARGET = "player_app.views.mdns_service.AsyncZeroconf"
+_PATCH_TARGET = "player_app.services.mdns_service.AsyncZeroconf"
 
 
 def test_start_registers_service_with_expected_info():

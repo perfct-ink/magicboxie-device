@@ -9,7 +9,7 @@ device directly over WiFi via mDNS and uses that for those. "http" mode
 (dev/testing - no Bluetooth required, e.g. no BlueZ on Docker Desktop/macOS)
 runs the HTTP service and mDNS advertisement alone, without BLE.
 
-Also runs a background transcode worker (views/transcode_service.py) that
+Also runs a background transcode worker (services/transcode_service.py) that
 re-encodes movies, one at a time, to something this device's weak CPU can
 actually decode smoothly - only while nothing is playing.
 """
@@ -64,7 +64,7 @@ BLE_RETRY_SECONDS = 5
 MDNS_RETRY_SECONDS = 5
 
 # The home server (MagicBoxie-web) this device checks in with for new content
-# when it has internet - see views/home_sync_service.py. Unset by default:
+# when it has internet - see services/home_sync_service.py. Unset by default:
 # the device works standalone (BLE/HTTP + whatever's already on disk), this
 # is opportunistic on top of that, not a requirement.
 HOME_SERVER_URL = os.environ.get("MAGICBOXIE_HOME_SERVER_URL", "")
@@ -183,7 +183,7 @@ async def _run_mdns(stop_event: asyncio.Event) -> None:
     up to the `asyncio.gather` in `_run()` and take down BLE/HTTP with it -
     mirrors _run_ble's identical rationale for the same asyncio.gather.
     """
-    from .views.mdns_service import MdnsAdvertiser
+    from .services.mdns_service import MdnsAdvertiser
 
     while not stop_event.is_set():
         advertiser = MdnsAdvertiser(DEVICE_NAME, local_ip(), HTTP_PORT)
@@ -229,19 +229,19 @@ async def _run_playback(controller: PlaybackController, stop_event: asyncio.Even
 
 async def _run_transcode(controller: PlaybackController, stop_event: asyncio.Event) -> None:
     """Re-encodes movies in the background, one at a time, to something this
-    device's weak CPU can decode smoothly - see views/transcode_service.py
+    device's weak CPU can decode smoothly - see services/transcode_service.py
     for why and the encode settings. Only runs while idle (checked
     internally against controller.is_idle), so it never competes with
     playback decode for the same core."""
-    from .views.transcode_service import TranscodeService
+    from .services.transcode_service import TranscodeService
 
     await TranscodeService(controller).run(stop_event)
 
 
 async def _run_idle_dim(controller: PlaybackController, stop_event: asyncio.Event) -> None:
     """Dims the idle screen after extended inactivity - see
-    views/idle_dim_service.py."""
-    from .views.idle_dim_service import IdleDimService
+    services/idle_dim_service.py."""
+    from .services.idle_dim_service import IdleDimService
 
     await IdleDimService(controller).run(stop_event)
 
@@ -265,7 +265,7 @@ async def _run_keyboard(controller: PlaybackController, stop_event: asyncio.Even
     """Escape-to-stop from a directly-attached USB keyboard - the device's
     only local input, independent of BLE/HTTP and the iOS app. Runs in both
     transport modes, and is a no-op if no keyboard is ever attached."""
-    from .views.keyboard_service import KeyboardService
+    from .services.keyboard_service import KeyboardService
 
     await KeyboardService(controller).run(stop_event)
 
@@ -341,7 +341,7 @@ async def _run_ble_once(controller: PlaybackController, stop_event: asyncio.Even
     from bluez_peripheral.util import get_message_bus
 
     from .models import protocol
-    from .views.ble_service import MagicBoxieService
+    from .services.ble_service import MagicBoxieService
 
     service = MagicBoxieService(controller, HTTP_PORT)
 
@@ -388,7 +388,7 @@ async def _run_home_sync(controller: PlaybackController, stop_event: asyncio.Eve
     """Retries a home server check-in on an interval. The device is offline
     most of the time, so a failed attempt (no route, DNS failure, etc.) is
     expected and just gets logged - not treated as fatal."""
-    from .views.home_sync_service import HomeServerSync
+    from .services.home_sync_service import HomeServerSync
 
     redraw_requested = asyncio.Event()
 

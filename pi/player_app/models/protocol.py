@@ -18,13 +18,13 @@ LIBRARY_CHARACTERISTIC_UUID = "3e2c1a00-3b42-4b7e-9c3e-000000000004"
 # (thumbnails, library, status polling) that BLE's tiny ATT payloads can't carry.
 NETWORK_INFO_CHARACTERISTIC_UUID = "3e2c1a00-3b42-4b7e-9c3e-000000000005"
 # Read-only + notify: which movie (if any) TranscodeService is currently
-# re-encoding in the background - see views/transcode_service.py.
+# re-encoding in the background - see services/transcode_service.py.
 TRANSCODE_STATUS_CHARACTERISTIC_UUID = "3e2c1a00-3b42-4b7e-9c3e-000000000006"
 # Read-only: see API_VERSION below.
 API_VERSION_CHARACTERISTIC_UUID = "3e2c1a00-3b42-4b7e-9c3e-000000000007"
 # Write-only: lets the phone join the device to a new WiFi network (e.g. an
 # iPhone's Personal Hotspot in a car, with no home network in range) over
-# BLE, without needing SSH access - see views/wifi_provisioning.py.
+# BLE, without needing SSH access - see services/wifi_provisioning.py.
 WIFI_PROVISION_CHARACTERISTIC_UUID = "3e2c1a00-3b42-4b7e-9c3e-000000000008"
 
 # UTF-8 update message, empty when no update is active. Additive for older apps.

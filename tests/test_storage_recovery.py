@@ -92,7 +92,7 @@ def test_stale_update_marker_is_ignored(tmp_path, monkeypatch):
 
 def test_interrupted_download_never_publishes_movie(tmp_path):
     import asyncio
-    from player_app.views.home_sync_service import HomeServerSync
+    from player_app.services.home_sync_service import HomeServerSync
 
     library = library_at(tmp_path)
     sync = HomeServerSync(library, "http://example.test", "password")

@@ -1,12 +1,12 @@
 import asyncio
 from unittest.mock import AsyncMock, patch
 
-from player_app.views.wifi_provisioning import apply_wifi_credentials
+from player_app.services.wifi_provisioning import apply_wifi_credentials
 
 # Real nmcli subprocess creation is patched out so these tests don't depend
 # on real network hardware - matching how test_transcode_service.py patches
 # out ffmpeg rather than requiring a real encoder.
-_PATCH_TARGET = "player_app.views.wifi_provisioning.asyncio.create_subprocess_exec"
+_PATCH_TARGET = "player_app.services.wifi_provisioning.asyncio.create_subprocess_exec"
 
 
 class FakeProcess:
@@ -19,7 +19,7 @@ class FakeProcess:
 
 
 def test_apply_wifi_credentials_calls_nmcli_with_the_given_network(tmp_path):
-    with patch("player_app.views.wifi_provisioning.save_network") as save, \
+    with patch("player_app.services.wifi_provisioning.save_network") as save, \
             patch(_PATCH_TARGET, new=AsyncMock(return_value=FakeProcess())) as mock_exec:
         result = asyncio.run(apply_wifi_credentials("MyHotspot", "hunter2"))
 

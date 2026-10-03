@@ -2,7 +2,7 @@ import asyncio
 from unittest.mock import AsyncMock, patch
 
 from player_app.models.protocol import Movie
-from player_app.views.ble_service import MagicBoxieService
+from player_app.services.ble_service import MagicBoxieService
 
 # @characteristic(...) replaces the decorated method with a `characteristic`
 # descriptor object (see bluez_peripheral.gatt.characteristic) rather than
@@ -79,7 +79,7 @@ def test_wifi_provision_write_schedules_apply_with_decoded_credentials():
     payload = bytes([len(ssid)]) + ssid + b"hunter2"
 
     async def scenario():
-        with patch("player_app.views.ble_service.apply_wifi_credentials", new=AsyncMock()) as mock_apply:
+        with patch("player_app.services.ble_service.apply_wifi_credentials", new=AsyncMock()) as mock_apply:
             _wifi_provision_setter(service, payload, _FakeOptions(offset=0))
             # The setter itself only schedules a task (create_task) so it can
             # return immediately and let BlueZ send the ATT write response -
@@ -92,7 +92,7 @@ def test_wifi_provision_write_schedules_apply_with_decoded_credentials():
 
 def test_wifi_provision_write_drops_malformed_payload_without_scheduling_anything():
     service = _make_service([])
-    with patch("player_app.views.ble_service.apply_wifi_credentials", new=AsyncMock()) as mock_apply:
+    with patch("player_app.services.ble_service.apply_wifi_credentials", new=AsyncMock()) as mock_apply:
         _wifi_provision_setter(service, b"", _FakeOptions(offset=0))
     mock_apply.assert_not_called()
 

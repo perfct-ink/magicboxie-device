@@ -3,7 +3,7 @@
 VENV := .venv
 THUMBNAIL_DIR := /var/lib/magicboxie/thumbnails
 TRANSCODE_DIR := /var/lib/magicboxie/transcoded
-# MagicBoxie-web's LAN hostname - see player_app/views/home_sync_service.py.
+# MagicBoxie-web's LAN hostname - see player_app/services/home_sync_service.py.
 # Override (e.g. to empty) for a device with no home server to sync with.
 HOME_SERVER_URL := http://magicboxie.local
 # Deliberately no default (and never commit a real one here) - pass on the
