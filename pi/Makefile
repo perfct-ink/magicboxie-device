@@ -61,7 +61,7 @@ pi: pi-pull pi-setup pi-service pi-self-update-service pi-wifi-service
 # so deploy files added since the original install are checked out.
 pi-sparse-refresh:
 	@if [ "$$(git config --get core.sparseCheckout)" = "true" ]; then \
-		git sparse-checkout set --no-cone /pi/ /Makefile; \
+		git -C "$$(git rev-parse --show-toplevel)" sparse-checkout set --no-cone /pi/ /Makefile; \
 	fi
 
 pi-pull: pi-sparse-refresh
