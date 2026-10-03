@@ -5,5 +5,5 @@ __pycache__/
 .pytest_cache/
 movies/
 
-# The static deploy/wifi-networks.json is intentionally tracked.
+# The static system/wifi-networks.json is intentionally tracked.
 wifi-networks.lock

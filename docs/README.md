@@ -64,7 +64,7 @@ preempt the saved-network startup window. Profile activation uses
 [NetworkManager's saved connections](https://networkmanager.pages.freedesktop.org/NetworkManager/NetworkManager/nmcli.html).
 
 Saved SSIDs and passwords live in **`/var/lib/magicboxie/wifi-networks.json`**,
-outside the Git checkout. The installer copies the tracked **`pi/deploy/wifi-networks.json`** only if the
+outside the Git checkout. The installer copies the tracked **`pi/system/wifi-networks.json`** only if the
 device file does not already exist, preserves it across updates, and sets permissions to `600`
 (owner and root only). Successful BLE provisioning updates this file atomically.
 Startup restores these entries into NetworkManager before trying saved Wi-Fi.
@@ -84,7 +84,7 @@ Edit the file on the Pi with `sudoedit /var/lib/magicboxie/wifi-networks.json`:
 
 Replace the example passwords with the real ones. An empty password represents
 an open network; protected entries use WPA personal passwords. The static
-`pi/deploy/wifi-networks.json` may contain credentials and be committed, as
+`pi/system/wifi-networks.json` may contain credentials and be committed, as
 authorized. It currently contains an empty list because no credentials have
 been supplied. Editing the tracked file seeds new installations; to update an
 existing device, edit its runtime file as shown above. Manually creating profiles with `nmcli` does not update the JSON

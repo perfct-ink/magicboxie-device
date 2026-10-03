@@ -87,7 +87,7 @@ On an existing checkout, bootstrap fetches the selected branch and resets
 tracked files to the remote version. Preserve local edits before rerunning
 it. Runtime movies and Wi-Fi credentials live outside the checkout.
 Reusing the new bootstrap also expands older sparse checkouts to include
-all `deploy` files required by the new services.
+all `pi/system` files required by the new services.
 If the daemon was already running, follow installation with `make pi-restart`:
 `pi-install` uses `systemctl start`, which does not restart an active daemon.
 
@@ -146,7 +146,7 @@ that service to an older device.
 
 ## Saved Wi-Fi and startup behavior
 
-The tracked seed file is `pi/deploy/wifi-networks.json`. The installer copies it
+The tracked seed file is `pi/system/wifi-networks.json`. The installer copies it
 to `/var/lib/magicboxie/wifi-networks.json` only if the runtime file is absent.
 Existing runtime credentials survive installation, Git updates, and reboots.
 The runtime file has mode `600` and belongs to the device account. The tracked

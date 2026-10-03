@@ -164,7 +164,7 @@ class PlaybackController:
         routed through the same command channel as everything else since
         there's no separate system-command pathway and this is the only
         such action that exists. Needs sudo since the service itself runs
-        unprivileged (see deploy/magicboxie-device.service.in) - relies on
+        unprivileged (see system/magicboxie-device.service.in) - relies on
         the Pi's default passwordless sudo for the setup user rather than
         provisioning a narrower rule, since that's already how this
         specific device is configured."""

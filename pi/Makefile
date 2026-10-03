@@ -49,7 +49,7 @@ install: setup seed-movies service self-update-service wifi-service start wifi-s
 # Day-to-day version of install, for after the device is already set up:
 # pulls whatever's new, re-runs setup (covers newly-added system deps or a
 # changed pyproject.toml - a no-op otherwise), re-renders the systemd units
-# (covers changes to either deploy/*.in template), and restarts. Every step
+# (covers changes to either system/*.in template), and restarts. Every step
 # is idempotent, so this is safe to re-run any time you've pushed changes
 # and want the Pi caught up and running them.
 deploy: pull setup service self-update-service wifi-service
@@ -97,7 +97,7 @@ setup: sparse-refresh
 	sudo chown "$$(whoami)" $(THUMBNAIL_DIR) $(TRANSCODE_DIR) $(CONTENT_DIR)
 	sudo install -d -m 700 -o "$$(whoami)" /var/lib/magicboxie
 	@if [ ! -e /var/lib/magicboxie/wifi-networks.json ]; then \
-		sudo install -m 600 -o "$$(whoami)" deploy/wifi-networks.json /var/lib/magicboxie/wifi-networks.json; \
+		sudo install -m 600 -o "$$(whoami)" system/wifi-networks.json /var/lib/magicboxie/wifi-networks.json; \
 	fi
 	sudo chown "$$(whoami)" /var/lib/magicboxie/wifi-networks.json
 	sudo chmod 600 /var/lib/magicboxie/wifi-networks.json
@@ -126,7 +126,7 @@ test:
 	$(VENV)/bin/pip install -e ".[dev]"
 	$(VENV)/bin/python -m pytest -v ../tests
 
-# Renders deploy/magicboxie-device.service.in (user/paths filled in) to
+# Renders system/magicboxie-device.service.in (user/paths filled in) to
 # /etc/systemd/system and enables it to start on boot. Doesn't start it -
 # run `make start` (or reboot) after.
 service: setup
@@ -138,7 +138,7 @@ service: setup
 		-e 's|@TRANSCODE_DIR@|$(TRANSCODE_DIR)|g' \
 		-e 's|@HOME_SERVER_URL@|$(HOME_SERVER_URL)|g' \
 		-e 's|@HOME_SERVER_PASSWORD@|$(HOME_SERVER_PASSWORD)|g' \
-		deploy/magicboxie-device.service.in | sudo tee $(SERVICE_FILE) >/dev/null
+		system/magicboxie-device.service.in | sudo tee $(SERVICE_FILE) >/dev/null
 	sudo systemctl daemon-reload
 	sudo systemctl enable $(SERVICE_NAME)
 	@echo "Service installed and enabled - run 'make start' to start it now."
@@ -147,15 +147,15 @@ service: setup
 # Startup tries saved networks before activating the AP as a fallback.
 wifi-service:
 	sudo install -d -m 700 /etc/NetworkManager/system-connections
-	sudo install -m 600 deploy/magicboxie-hotspot.nmconnection /etc/NetworkManager/system-connections/magicboxie-hotspot.nmconnection
-	sudo install -m 644 deploy/magicboxie-hotspot-dnsmasq.conf /etc/magicboxie-hotspot-dnsmasq.conf
+	sudo install -m 600 system/magicboxie-hotspot.nmconnection /etc/NetworkManager/system-connections/magicboxie-hotspot.nmconnection
+	sudo install -m 644 system/magicboxie-hotspot-dnsmasq.conf /etc/magicboxie-hotspot-dnsmasq.conf
 	sudo dnsmasq --test --conf-file=/etc/magicboxie-hotspot-dnsmasq.conf
-	sudo install -m 644 deploy/magicboxie-hotspot.service /etc/systemd/system/magicboxie-hotspot.service
+	sudo install -m 644 system/magicboxie-hotspot.service /etc/systemd/system/magicboxie-hotspot.service
 	sudo systemctl enable --now NetworkManager
 	sudo nmcli connection reload
 	sudo install -d -m 755 /usr/local/lib/magicboxie
 	sudo install -m 644 player_app/wifi_startup.py player_app/wifi_networks.py player_app/storage.py /usr/local/lib/magicboxie/
-	sudo install -m 644 deploy/magicboxie-wifi-startup.service /etc/systemd/system/magicboxie-wifi-startup.service
+	sudo install -m 644 system/magicboxie-wifi-startup.service /etc/systemd/system/magicboxie-wifi-startup.service
 	sudo systemctl disable magicboxie-hotspot
 	sudo systemctl daemon-reload
 	sudo systemctl enable magicboxie-wifi-startup
@@ -246,10 +246,10 @@ self-update-service:
 	sed \
 		-e 's|@USER@|'"$$(whoami)"'|g' \
 		-e 's|@REPO_DIR@|$(CURDIR)|g' \
-		deploy/magicboxie-self-update.service.in | sudo tee $(SELF_UPDATE_SERVICE_FILE) >/dev/null
-	sudo cp deploy/magicboxie-self-update.timer.in $(SELF_UPDATE_TIMER_FILE)
+		system/magicboxie-self-update.service.in | sudo tee $(SELF_UPDATE_SERVICE_FILE) >/dev/null
+	sudo cp system/magicboxie-self-update.timer.in $(SELF_UPDATE_TIMER_FILE)
 	sed -e 's|@REPO_DIR@|$(CURDIR)|g' \
-		deploy/magicboxie-boot-update.service.in | sudo tee $(BOOT_UPDATE_SERVICE_FILE) >/dev/null
+		system/magicboxie-boot-update.service.in | sudo tee $(BOOT_UPDATE_SERVICE_FILE) >/dev/null
 	sudo systemctl daemon-reload
 	sudo systemctl enable --now $(SELF_UPDATE_NAME).timer
 	sudo systemctl enable $(BOOT_UPDATE_NAME).service
