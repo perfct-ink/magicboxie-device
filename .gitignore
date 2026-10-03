@@ -7,3 +7,6 @@ movies/
 
 # The static system/wifi-networks.json is intentionally tracked.
 wifi-networks.lock
+
+# Personal Claude Code permissions
+.claude/settings.local.json

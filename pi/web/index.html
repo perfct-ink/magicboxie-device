@@ -13,7 +13,10 @@
 <main>
 <section class="hero hidden" id="hero"><img id="heroImg" alt=""><div class="info"><div class="label">Now playing</div><div class="title" id="heroTitle"></div></div></section>
 <input id="search" type="search" placeholder="Search movies" aria-label="Search movies" autocomplete="off">
-<h2>Movies</h2>
+<div class="sectionhead"><h2>Movies</h2>
+<button id="upload" class="btn red small">+ Upload</button>
+<input id="file" type="file" accept="video/*,.mkv,.avi,.mov,.m4v,.mp4,.webm" multiple hidden></div>
+<div id="uploads"></div>
 <div id="grid"><div class="empty">Loading movies…</div></div>
 </main>
 <div id="sheet" class="hidden" role="dialog" aria-modal="true"><div class="panel" id="panel"></div></div>

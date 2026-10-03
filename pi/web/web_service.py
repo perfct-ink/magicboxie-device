@@ -10,11 +10,12 @@ from __future__ import annotations
 import logging
 import uuid
 from pathlib import Path
+from urllib.parse import unquote
 
 from aiohttp import web
 
 from . import system_info
-from .portal import PAGE, PORTAL_URL, STATIC_DIR
+from .portal import PAGE, STATIC_DIR, WELCOME_PAGE, WELCOME_URL
 from player_app.storage import publish_file, run_io
 from player_app.controllers.playback_controller import PlaybackController
 from player_app.models.library import VIDEO_EXTENSIONS
@@ -40,6 +41,7 @@ def create_app(controller: PlaybackController) -> web.Application:
     app[_CONTROLLER_KEY] = controller
 
     app.router.add_get("/", _get_portal)
+    app.router.add_get("/welcome", _get_welcome)
     app.router.add_static("/static/", STATIC_DIR)
     app.on_response_prepare.append(_revalidate_static)
     app.router.add_get("/api/movies", _get_movies)
@@ -71,10 +73,14 @@ async def _get_portal(request: web.Request) -> web.Response:
     return web.Response(text=PAGE, content_type="text/html", headers={"Cache-Control": "no-store"})
 
 
+async def _get_welcome(request: web.Request) -> web.Response:
+    return web.Response(text=WELCOME_PAGE, content_type="text/html", headers={"Cache-Control": "no-store"})
+
+
 async def _redirect_to_portal(request: web.Request) -> web.Response:
     if request.path.startswith("/api/"):
         raise web.HTTPNotFound()
-    raise web.HTTPFound(PORTAL_URL, headers={"Cache-Control": "no-store"})
+    raise web.HTTPFound(WELCOME_URL, headers={"Cache-Control": "no-store"})
 
 
 def _movie_payload(controller: PlaybackController, movie: Movie) -> dict:
@@ -147,6 +153,10 @@ async def _post_movie(request: web.Request) -> web.Response:
     """
     controller = request.app[_CONTROLLER_KEY]
     filename = request.headers.get("X-Filename")
+    if filename and request.headers.get("X-Filename-Encoding") == "uri":
+        # Browsers can only send ISO-8859-1 header values, so the web page
+        # percent-encodes names that contain other characters.
+        filename = unquote(filename)
     if not filename or "/" in filename or filename.startswith("."):
         return web.json_response({"error": "missing or invalid X-Filename header"}, status=400)
 

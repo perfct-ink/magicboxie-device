@@ -560,7 +560,7 @@ def test_captive_portal_probes_redirect_to_fixed_device_address():
                          "/ncsi.txt", "/redirect", "/unknown?next=https://example.com"):
                 response = await client.get(path, headers={"Host": "untrusted.example"}, allow_redirects=False)
                 assert response.status == 302
-                assert response.headers["Location"] == "http://10.42.0.1/"
+                assert response.headers["Location"] == "http://10.42.0.1/welcome"
                 assert response.headers["Cache-Control"] == "no-store"
             response = await client.head("/generate_204", allow_redirects=False)
             assert response.status == 302
@@ -642,3 +642,44 @@ def test_reboot_reports_success_and_failure():
     assert asyncio.run(scenario(None)) == (200, {"ok": True})
     status, body = asyncio.run(scenario("not permitted"))
     assert status == 500 and body["error"] == "not permitted"
+
+
+def test_post_movie_accepts_a_percent_encoded_filename(tmp_path):
+    library = _real_library(tmp_path)
+
+    async def scenario():
+        client, _ = await _make_client(library)
+        try:
+            resp = await client.post(
+                "/api/movies",
+                data=b"fake-video-bytes",
+                headers={"X-Filename": "Caf%C3%A9%20Film.mp4", "X-Filename-Encoding": "uri"},
+            )
+            assert resp.status == 201
+            traversal = await client.post(
+                "/api/movies",
+                data=b"x",
+                headers={"X-Filename": "..%2Fescape.mp4", "X-Filename-Encoding": "uri"},
+            )
+            assert traversal.status == 400
+        finally:
+            await client.close()
+
+    asyncio.run(scenario())
+    assert (tmp_path / "movies" / "Café Film.mp4").read_bytes() == b"fake-video-bytes"
+    assert not (tmp_path / "escape.mp4").exists()
+
+
+def test_welcome_page_only_points_to_the_browser():
+    async def scenario():
+        client, _ = await _make_client()
+        try:
+            response = await client.get("/welcome")
+            assert response.status == 200
+            html = await response.text()
+            assert "http://10.42.0.1/" in html
+            assert "/api/" not in html
+            assert (await client.get("/static/welcome.js")).status == 200
+        finally:
+            await client.close()
+    asyncio.run(scenario())

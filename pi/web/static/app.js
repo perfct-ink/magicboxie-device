@@ -169,3 +169,37 @@ function openSettings() {
   refreshSettings(); clearInterval(settingsTimer); settingsTimer = setInterval(refreshSettings, 5000);
 }
 $('gear').addEventListener('click', openSettings);
+
+// ---- Upload movies from this browser ----
+function uploadOne(file) {
+  const row = document.createElement('div'); row.className = 'upl';
+  const label = document.createElement('div'); label.textContent = file.name + ' — waiting…';
+  const bar = document.createElement('div'); bar.className = 'bar'; const fill = document.createElement('i'); bar.append(fill);
+  row.append(label, bar); $('uploads').append(row);
+  return new Promise(resolve => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/movies');
+    xhr.setRequestHeader('X-Filename', encodeURIComponent(file.name));
+    xhr.setRequestHeader('X-Filename-Encoding', 'uri');
+    const fail = message => {row.classList.add('err'); label.textContent = file.name + ' — ' + message; bar.remove(); resolve(false);};
+    xhr.upload.onprogress = e => {
+      if (!e.lengthComputable) return;
+      const pct = Math.floor(e.loaded / e.total * 100);
+      label.textContent = file.name + ' — uploading ' + pct + '%'; fill.style.width = pct + '%';
+    };
+    xhr.onload = () => {
+      if (xhr.status === 201) {label.textContent = file.name + ' — uploaded'; fill.style.width = '100%'; setTimeout(() => row.remove(), 4000); resolve(true); return;}
+      let message = 'upload failed (' + xhr.status + ')';
+      try {message = JSON.parse(xhr.responseText).error || message;} catch (e) {}
+      fail(message);
+    };
+    xhr.onerror = () => fail('connection lost');
+    xhr.send(file);
+  });
+}
+async function uploadFiles(files) {
+  for (const file of files) await uploadOne(file);
+  await load(); await status();
+}
+$('upload').addEventListener('click', () => $('file').click());
+$('file').addEventListener('change', () => {uploadFiles(Array.from($('file').files)); $('file').value = '';});

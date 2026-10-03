@@ -86,6 +86,10 @@ setup: sparse-refresh
 		sudo hostnamectl set-hostname magicboxie-player; \
 	fi
 	sudo systemctl enable --now avahi-daemon
+	@# Persistent journal (size-capped) so a reboot or crash leaves logs to read with `journalctl -b -1`.
+	sudo mkdir -p /var/log/journal /etc/systemd/journald.conf.d
+	printf '[Journal]\nStorage=persistent\nSystemMaxUse=50M\n' | sudo tee /etc/systemd/journald.conf.d/magicboxie.conf >/dev/null
+	sudo systemctl restart systemd-journald
 	printf '%s ALL=(root) NOPASSWD: /usr/bin/systemctl reboot, /usr/bin/systemctl poweroff\n' "$$(whoami)" | sudo tee /etc/sudoers.d/magicboxie >/dev/null
 	sudo chmod 440 /etc/sudoers.d/magicboxie
 	sudo visudo -cf /etc/sudoers.d/magicboxie >/dev/null || { sudo rm -f /etc/sudoers.d/magicboxie; exit 1; }

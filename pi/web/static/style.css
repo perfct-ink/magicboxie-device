@@ -47,3 +47,16 @@ box-shadow:0 0 0 1px rgba(255,255,255,.06);font:inherit}
 .info dt{color:#a3a3a3}.info dd{margin:0;word-break:break-word}
 .warn{color:#fbbf24}.bad{color:#f87171}.good{color:#86efac}
 #sheet .btn.danger{background:#e50914;color:#fff}
+.sectionhead{display:flex;align-items:center;justify-content:space-between}
+.btn.small{padding:8px 14px;font-size:14px}
+.upl{margin:0 0 10px;font-size:13px;color:#d4d4d4}
+.upl .bar{height:4px;background:#333;border-radius:2px;margin-top:4px;overflow:hidden}
+.upl .bar i{display:block;height:100%;width:0;background:#e50914;transition:width .2s}
+.upl.err{color:#fca5a5}
+body.welcome main{max-width:480px;text-align:center;padding-top:48px}
+.logo.big{font-size:34px}
+.welcome h1{font-size:26px;margin:24px 0 8px}
+.welcome p{line-height:1.5;color:#d4d4d4}
+.address{margin:16px 0 24px;padding:16px;border-radius:6px;background:#1f1f1f;border:1px solid #333;font:600 22px ui-monospace,monospace;user-select:all;word-break:break-all}
+.welcome .buttons{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+.welcome a.btn{text-decoration:none;display:inline-block}
