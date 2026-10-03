@@ -294,9 +294,7 @@ pi-self-update-service:
 		-e 's|@REPO_DIR@|$(CURDIR)|g' \
 		deploy/magicboxie-self-update.service.in | sudo tee $(SELF_UPDATE_SERVICE_FILE) >/dev/null
 	sudo cp deploy/magicboxie-self-update.timer.in $(SELF_UPDATE_TIMER_FILE)
-	sed \
-		-e 's|@USER@|'"$$(whoami)"'|g' \
-		-e 's|@REPO_DIR@|$(CURDIR)|g' \
+	sed -e 's|@REPO_DIR@|$(CURDIR)|g' \
 		deploy/magicboxie-boot-update.service.in | sudo tee $(BOOT_UPDATE_SERVICE_FILE) >/dev/null
 	sudo systemctl daemon-reload
 	sudo systemctl enable --now $(SELF_UPDATE_NAME).timer
@@ -308,9 +306,9 @@ pi-self-update-service:
 # device just continues with the code it has; the daily timer retries later.
 pi-boot-update:
 	@for i in $$(seq 1 30); do \
-		if git ls-remote --exit-code origin HEAD >/dev/null 2>&1; then \
+		if git -c safe.directory="$(CURDIR)" ls-remote --exit-code origin HEAD >/dev/null 2>&1; then \
 			echo "pi-boot-update: internet is up, requesting self-update"; \
-			sudo systemctl --no-block start $(SELF_UPDATE_NAME).service; \
+			systemctl --no-block start $(SELF_UPDATE_NAME).service; \
 			exit 0; \
 		fi; \
 		sleep 1; \

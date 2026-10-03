@@ -1,6 +1,6 @@
 # Template for /etc/systemd/system/magicboxie-boot-update.service - rendered
 # and enabled by `make pi-self-update-service`.
-# Runs once per boot, independently of magicboxie-device.service (nothing
+# Runs as root (so it can start the updater without a sudo prompt) once per boot, independently of magicboxie-device.service (nothing
 # waits on it, so playback and the hotspot start regardless). Waits up to
 # 30 seconds for internet over any interface, then queues a self-update; with
 # no internet it gives up and the device carries on with its current code.
@@ -10,7 +10,6 @@ After=network.target
 
 [Service]
 Type=oneshot
-User=@USER@
 WorkingDirectory=@REPO_DIR@
 ExecStart=/usr/bin/make -C @REPO_DIR@ pi-boot-update
 TimeoutStartSec=60
