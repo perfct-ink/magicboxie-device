@@ -13,7 +13,7 @@ from typing import Sequence
 from PIL import Image, ImageDraw, ImageFont
 
 from ..storage import atomic_write
-from .library import MovieLibrary
+from ..models.library import MovieLibrary
 
 IDLE_SCREEN_PATH = Path("/tmp/magicboxie-idle-screen.png")
 

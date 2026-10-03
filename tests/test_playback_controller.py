@@ -406,7 +406,7 @@ def test_background_playback_advances_without_transport_requests():
 
 
 def test_mpv_marks_only_natural_end_as_finished():
-    from player_app.models.player import MpvController
+    from player_app.views.player import MpvController
 
     async def scenario(reason):
         player = MpvController()

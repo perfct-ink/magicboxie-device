@@ -24,14 +24,14 @@ from typing import List
 
 from .controllers.playback_controller import PlaybackController
 from .models.library import MovieLibrary
-from .models.player import MpvController
+from .views.player import MpvController
 from .update_status import read_message, read_status
 from .storage import run_io
 from .util import local_ip, sleep_unless_stopped
 
 logger = logging.getLogger(__name__)
 
-DEVICE_NAME = "MagicBoxieDevice"
+DEVICE_NAME = "MagicBoxiePlayer"
 MOVIES_DIR = Path(os.environ.get("MAGICBOXIE_MOVIES_DIR", "/movies"))
 THUMBNAIL_DIR = Path(os.environ.get("MAGICBOXIE_THUMBNAIL_DIR", "/var/lib/magicboxie/thumbnails"))
 TRANSCODE_DIR = Path(os.environ.get("MAGICBOXIE_TRANSCODE_DIR", "/var/lib/magicboxie/transcoded"))

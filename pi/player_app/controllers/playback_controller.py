@@ -11,9 +11,9 @@ from typing import List, Optional
 
 from ..update_status import read_status
 from ..storage import read_dict, run_io, write_json
-from ..models.idle_screen import render_idle_screen
+from ..views.idle_screen import render_idle_screen
 from ..models.library import MovieLibrary
-from ..models.player import MpvController
+from ..views.player import MpvController
 from ..models.protocol import Command, Movie, Opcode, PlaybackState, PlaybackStatus
 
 logger = logging.getLogger(__name__)

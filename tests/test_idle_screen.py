@@ -1,6 +1,6 @@
 from PIL import Image
 
-from player_app.models.idle_screen import render_idle_screen
+from player_app.views.idle_screen import render_idle_screen
 
 from fakes import FakeLibrary
 
