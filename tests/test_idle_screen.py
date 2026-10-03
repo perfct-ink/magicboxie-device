@@ -85,8 +85,17 @@ def test_render_idle_screen_footer_grows_with_keyboard_and_status_lines(tmp_path
     base = height()
     with_keyboard = height(keyboard_names=["Test Keyboard"])
     no_keyboard = height(keyboard_names=[])
-    with_status = height(keyboard_names=[], status_message="Checking for internet…")
+    with_status = no_keyboard
 
     assert with_keyboard > base
     assert no_keyboard == with_keyboard
-    assert with_status > no_keyboard
+    assert with_status == no_keyboard
+
+
+def test_render_idle_screen_adds_a_banner_for_activity(tmp_path):
+    plain, banner = tmp_path / "a.png", tmp_path / "b.png"
+    render_idle_screen(_EmptyLibrary(), output_path=plain)
+    render_idle_screen(_EmptyLibrary(), output_path=banner, status_message="Updating device software")
+    with Image.open(plain) as a, Image.open(banner) as b:
+        assert b.height > a.height
+        assert b.getpixel((5, 5)) != (0, 0, 0)

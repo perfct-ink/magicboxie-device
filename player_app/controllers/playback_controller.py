@@ -75,6 +75,21 @@ class PlaybackController:
         self.last_input_at: float = self._startup_input_at
 
     @property
+    def activity_message(self) -> Optional[str]:
+        """What the device is busy doing, for the big banner on the idle
+        screen: update/internet progress first, then downloads and
+        transcodes."""
+        if self.status_message:
+            return self.status_message
+        if self.currently_syncing_movie_title:
+            return f"Downloading {self.currently_syncing_movie_title}"
+        movie_id = self.currently_transcoding_movie_id
+        if movie_id is not None:
+            movie = next((m for m in self.movies if m.id == movie_id), None)
+            return f"Optimizing {movie.title}" if movie else "Optimizing a movie"
+        return None
+
+    @property
     def update_status(self) -> Optional[str]:
         phase = self._software_update_phase
         if phase == "waiting":
@@ -153,7 +168,7 @@ class PlaybackController:
         the Pi's default passwordless sudo for the setup user rather than
         provisioning a narrower rule, since that's already how this
         specific device is configured."""
-        await asyncio.create_subprocess_exec("sudo", "systemctl", "poweroff")
+        await asyncio.create_subprocess_exec("sudo", "-n", "/usr/bin/systemctl", "poweroff")
 
     async def show_idle_screen(self) -> None:
         """Displays the thumbnail-grid home screen - the device's resting
@@ -176,7 +191,7 @@ class PlaybackController:
             return await run_io(render_idle_screen, self.library,
                                 syncing_title=self.currently_syncing_movie_title,
                                 keyboard_names=list(self.keyboard_names),
-                                status_message=self.status_message)
+                                status_message=self.activity_message)
 
     async def _show_idle_screen_locked(self) -> None:
         image_path = await self._render_idle_screen()

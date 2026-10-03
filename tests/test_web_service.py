@@ -605,3 +605,40 @@ def test_status_reports_internet_unreachable():
 
     data = asyncio.run(scenario())
     assert data["internet_reachable"] is False
+
+
+def test_info_reports_device_details():
+    async def scenario():
+        client, _ = await _make_client()
+        try:
+            with patch("pi.web.web_service.get_throttle_status", new=AsyncMock(return_value=None)), \
+                    patch("pi.web.web_service.internet_reachable", new=AsyncMock(return_value=True)), \
+                    patch("pi.web.web_service.system_info.snapshot",
+                          return_value={"hostname": "magicboxie-player", "mdns_name": "magicboxie-player.local"}):
+                response = await client.get("/api/info")
+                assert response.status == 200
+                return await response.json()
+        finally:
+            await client.close()
+
+    data = asyncio.run(scenario())
+    assert data["hostname"] == "magicboxie-player"
+    assert data["internet_reachable"] is True
+    assert data["movie_count"] == 2
+    assert data["keyboards"] == []
+    assert data["playback_status"] == "stopped"
+
+
+def test_reboot_reports_success_and_failure():
+    async def scenario(error):
+        client, _ = await _make_client()
+        try:
+            with patch("pi.web.web_service.system_info.reboot", new=AsyncMock(return_value=error)):
+                response = await client.post("/api/reboot")
+                return response.status, await response.json()
+        finally:
+            await client.close()
+
+    assert asyncio.run(scenario(None)) == (200, {"ok": True})
+    status, body = asyncio.run(scenario("not permitted"))
+    assert status == 500 and body["error"] == "not permitted"

@@ -156,7 +156,7 @@ def test_shutdown_invokes_systemctl_poweroff_via_sudo():
             return mock_exec
 
     mock_exec = asyncio.run(scenario())
-    mock_exec.assert_awaited_once_with("sudo", "systemctl", "poweroff")
+    mock_exec.assert_awaited_once_with("sudo", "-n", "/usr/bin/systemctl", "poweroff")
 
 
 def test_refresh_status_persists_playback_state(tmp_path):

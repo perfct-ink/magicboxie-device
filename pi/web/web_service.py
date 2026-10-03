@@ -13,6 +13,7 @@ from pathlib import Path
 
 from aiohttp import web
 
+from . import system_info
 from .portal import PAGE, PORTAL_URL, STATIC_DIR
 from player_app.storage import publish_file, run_io
 from player_app.controllers.playback_controller import PlaybackController
@@ -51,6 +52,8 @@ def create_app(controller: PlaybackController) -> web.Application:
     app.router.add_get("/api/status", _get_status)
     app.router.add_post("/api/command", _post_command)
     app.router.add_get("/api/version", _get_version)
+    app.router.add_get("/api/info", _get_info)
+    app.router.add_post("/api/reboot", _post_reboot)
     # Android, Apple, and Windows probe different HTTP paths. An unexpected
     # HTML redirect (rather than their expected success response) opens login.
     app.router.add_get("/{path:.*}", _redirect_to_portal)
@@ -286,4 +289,34 @@ async def _post_command(request: web.Request) -> web.Response:
     argument = payload.get("argument")
     cmd = Command(opcode=opcode, argument=None if argument is None else int(argument))
     await controller.handle_command(cmd)
+    return web.json_response({"ok": True})
+
+
+async def _get_info(request: web.Request) -> web.Response:
+    """Everything the web settings panel shows: network identity, hardware
+    and software details, and live health (temperature, power, internet)."""
+    controller = request.app[_CONTROLLER_KEY]
+    info = await run_io(system_info.snapshot, getattr(controller.library, "root", None))
+    throttle = await get_throttle_status()
+    state = await controller.refresh_status()
+    info.update({
+        "api_version": API_VERSION,
+        "ip_address": local_ip(),
+        "internet_reachable": await internet_reachable(),
+        "cpu_temperature_celsius": cpu_temperature_celsius(),
+        "under_voltage": throttle.under_voltage if throttle else None,
+        "throttled": throttle.throttled if throttle else None,
+        "playback_status": state.status.name.lower(),
+        "movie_count": len(controller.movies),
+        "update_status": controller.update_status,
+        "activity": controller.activity_message,
+        "keyboards": list(controller.keyboard_names),
+    })
+    return web.json_response(info)
+
+
+async def _post_reboot(request: web.Request) -> web.Response:
+    error = await system_info.reboot()
+    if error:
+        return web.json_response({"error": error}, status=500)
     return web.json_response({"ok": True})

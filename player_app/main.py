@@ -247,12 +247,15 @@ async def _run_idle_dim(controller: PlaybackController, stop_event: asyncio.Even
 
 
 async def _run_status_message(controller: PlaybackController, stop_event: asyncio.Event) -> None:
-    """Shows internet/update progress (written by the boot-update and
-    self-update processes) in the idle screen's footer."""
+    """Shows what the device is doing (internet/update progress from the
+    boot-update and self-update processes, downloads, transcodes) as a big
+    banner on the idle screen."""
+    shown = None
     while not stop_event.is_set():
-        message = await run_io(read_message)
-        if message != controller.status_message:
-            controller.status_message = message
+        controller.status_message = await run_io(read_message)
+        message = controller.activity_message
+        if message != shown:
+            shown = message
             if controller.is_idle:
                 await controller.show_idle_screen()
         await sleep_unless_stopped(stop_event, 2)

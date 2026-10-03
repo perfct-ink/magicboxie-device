@@ -138,6 +138,9 @@ pi-setup: pi-sparse-refresh
 		sudo hostnamectl set-hostname magicboxie-player; \
 	fi
 	sudo systemctl enable --now avahi-daemon
+	printf '%s ALL=(root) NOPASSWD: /usr/bin/systemctl reboot, /usr/bin/systemctl poweroff\n' "$$(whoami)" | sudo tee /etc/sudoers.d/magicboxie >/dev/null
+	sudo chmod 440 /etc/sudoers.d/magicboxie
+	sudo visudo -cf /etc/sudoers.d/magicboxie >/dev/null || { sudo rm -f /etc/sudoers.d/magicboxie; exit 1; }
 	sudo usermod -aG video,input,bluetooth "$$(whoami)"
 	python3 -m venv $(VENV)
 	$(VENV)/bin/pip install --upgrade pip

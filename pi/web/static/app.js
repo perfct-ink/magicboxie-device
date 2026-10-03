@@ -61,7 +61,7 @@ function openSheet(m) {
   close.addEventListener('click', closeSheet);
   row.append(play, close); body.append(row); panel.append(body); $('sheet').classList.remove('hidden');
 }
-function closeSheet() {$('sheet').classList.add('hidden');}
+function closeSheet() {$('sheet').classList.add('hidden'); clearInterval(settingsTimer);}
 $('sheet').addEventListener('click', e => {if (e.target === $('sheet')) closeSheet();});
 $('search').addEventListener('input', render);
 $('toggle').addEventListener('click', () => command(state.status === 'playing' ? 'pause' : 'play'));
@@ -92,3 +92,80 @@ async function load() {
   render();
 }
 load().then(status); setInterval(status, 3000);
+
+// ---- Settings (gear): device details and reboot ----
+let settingsTimer = null;
+const dur = s => {
+  const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
+  return (d ? d + 'd ' : '') + (h || d ? h + 'h ' : '') + m + 'm';
+};
+function section(title, rows) {
+  const box = document.createElement('div'); box.className = 'info';
+  const h = document.createElement('h4'); h.textContent = title;
+  const dl = document.createElement('dl');
+  for (const [name, value, tone] of rows) {
+    if (value === null || value === undefined || value === '') continue;
+    const dt = document.createElement('dt'); dt.textContent = name;
+    const dd = document.createElement('dd'); dd.textContent = value; if (tone) dd.className = tone;
+    dl.append(dt, dd);
+  }
+  box.append(h, dl); return box;
+}
+function renderSettings(info) {
+  const body = $('settingsBody'); body.replaceChildren();
+  const ips = (info.addresses || []).map(a => a.address + ' (' + a.interface + ')').join(', ') || info.ip_address;
+  const conns = (info.connections || []).map(c => c.name + ' · ' + c.type).join(', ');
+  const mem = info.memory_mb ? (info.memory_mb.total - info.memory_mb.available) + ' / ' + info.memory_mb.total + ' MB used' : null;
+  const disk = d => d ? d.free + ' GB free of ' + d.total + ' GB' : null;
+  const temp = info.cpu_temperature_celsius;
+  const power = info.under_voltage ? ['Power', 'Under-voltage now', 'bad'] : info.throttled ? ['Power', 'CPU throttled', 'warn']
+    : info.under_voltage === false ? ['Power', 'OK', 'good'] : ['Power', null];
+  body.append(
+    section('Network', [
+      ['Hostname', info.hostname], ['Address on network', info.mdns_name],
+      ['IP address', ips], ['Connection', conns],
+      ['Internet', info.internet_reachable ? 'Reachable' : 'Not reachable', info.internet_reachable ? 'good' : 'warn'],
+    ]),
+    section('Device', [
+      ['Model', info.model], ['Uptime', info.uptime_seconds != null ? dur(info.uptime_seconds) : null],
+      ['CPU temperature', temp != null ? temp.toFixed(1) + ' °C' : null, temp > 75 ? 'bad' : temp > 65 ? 'warn' : ''],
+      power, ['Load average', info.load_average ? info.load_average.join(' · ') : null],
+      ['Memory', mem], ['Movie storage', disk(info.disk_movies_gb)], ['System storage', disk(info.disk_system_gb)],
+    ]),
+    section('Playback', [
+      ['Status', info.playback_status], ['Movies', info.movie_count],
+      ['Activity', info.activity || info.update_status],
+      ['Keyboard', info.keyboards && info.keyboards.length ? info.keyboards.join(', ') : 'None detected'],
+    ]),
+    section('Software', [
+      ['Version', info.software ? info.software.commit + ' · ' + info.software.date : null],
+      ['Latest change', info.software && info.software.subject], ['API version', info.api_version],
+    ]),
+  );
+}
+async function refreshSettings() {
+  try {renderSettings(await api('/api/info'));}
+  catch (error) {$('settingsBody').textContent = 'Could not load device details: ' + error.message;}
+}
+function openSettings() {
+  const panel = $('panel'); panel.replaceChildren();
+  const body = document.createElement('div'); body.className = 'body';
+  const h = document.createElement('h3'); h.textContent = 'Device settings';
+  const details = document.createElement('div'); details.id = 'settingsBody'; details.textContent = 'Loading…';
+  const note = document.createElement('p'); note.id = 'settingsNote'; note.className = 'meta';
+  const row = document.createElement('div'); row.className = 'row';
+  const reboot = document.createElement('button'); reboot.className = 'btn danger'; reboot.textContent = 'Reboot device';
+  reboot.addEventListener('click', async () => {
+    if (!confirm('Reboot the device? Playback stops and the device is unavailable for about a minute.')) return;
+    try {
+      await api('/api/reboot', {method:'POST'});
+      note.textContent = 'Rebooting… this page reconnects when the device is back.';
+    } catch (error) {note.textContent = error.message;}
+  });
+  const close = document.createElement('button'); close.className = 'btn grey'; close.textContent = 'Close';
+  close.addEventListener('click', closeSheet);
+  row.append(reboot, close); body.append(h, details, note, row); panel.append(body);
+  $('sheet').classList.remove('hidden');
+  refreshSettings(); clearInterval(settingsTimer); settingsTimer = setInterval(refreshSettings, 5000);
+}
+$('gear').addEventListener('click', openSettings);
