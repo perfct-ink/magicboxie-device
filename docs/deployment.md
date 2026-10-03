@@ -11,10 +11,16 @@ The development Mac's SSH alias `pi` resolves to `192.168.86.27`, hostname
 server**, not the target device. Do not deploy device changes through that
 alias until it has been pointed at the correct Pi.
 
-The target device's LAN address and SSH account have not yet been confirmed.
-Replace `DEVICE_USER` and `DEVICE_IP` in the commands below once discovery or
-the router's client list identifies it. The bootstrap's default checkout is
-`~/magicboxie-device` under that account.
+On October 3, 2026, `192.168.86.57` resolved to `magicboxie-player.lan` and
+responded to the device API at `http://192.168.86.57:8000/api/version`, reporting
+its own IP as `192.168.86.57`. Ports 22 and 8000 were open; port 80 was closed.
+This is the device candidate to use instead of the home server.
+
+The SSH account has not yet been confirmed. Key authentication as `admin`
+failed, so hardware, service state, and checkout paths have not been inspected
+on this host. Replace `DEVICE_USER` in the commands below with its actual
+account and `DEVICE_IP` with `192.168.86.57` (or its current address). The
+bootstrap's default checkout is `~/magicboxie-device` under that account.
 
 Look for the service `MagicBoxieDevice._magicboxie._tcp.local.`. The home
 server also advertised that name with an unusable `127.0.0.1` address; neither

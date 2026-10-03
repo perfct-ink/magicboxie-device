@@ -565,3 +565,37 @@ def test_captive_portal_probes_redirect_to_fixed_device_address():
         finally:
             await client.close()
     asyncio.run(scenario())
+
+
+def test_status_reports_internet_reachable():
+    async def scenario():
+        client, _ = await _make_client()
+        try:
+            with patch(
+                "player_app.views.web_service.internet_reachable",
+                new=AsyncMock(return_value=True),
+            ):
+                resp = await client.get("/api/status")
+                return await resp.json()
+        finally:
+            await client.close()
+
+    data = asyncio.run(scenario())
+    assert data["internet_reachable"] is True
+
+
+def test_status_reports_internet_unreachable():
+    async def scenario():
+        client, _ = await _make_client()
+        try:
+            with patch(
+                "player_app.views.web_service.internet_reachable",
+                new=AsyncMock(return_value=False),
+            ):
+                resp = await client.get("/api/status")
+                return await resp.json()
+        finally:
+            await client.close()
+
+    data = asyncio.run(scenario())
+    assert data["internet_reachable"] is False

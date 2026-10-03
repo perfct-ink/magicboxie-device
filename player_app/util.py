@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import socket
+import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 
 _THERMAL_ZONE_PATH = Path("/sys/class/thermal/thermal_zone0/temp")
 # vcgencmd get_throttled's bitmask - see Raspberry Pi's own documentation.
@@ -16,6 +17,16 @@ _THERMAL_ZONE_PATH = Path("/sys/class/thermal/thermal_zone0/temp")
 # this device at this moment," which is what a live status display needs.
 _UNDER_VOLTAGE_NOW_BIT = 0x1
 _THROTTLED_NOW_BIT = 0x4
+
+# A raw TCP connect to a public DNS resolver's HTTPS port answers "can this
+# device actually reach the internet" without depending on DNS working, and
+# without sending anything to a real service. Cached so that repeated status
+# polls from the iOS app don't each open a fresh connection.
+_INTERNET_CHECK_HOST = "1.1.1.1"
+_INTERNET_CHECK_PORT = 443
+_INTERNET_CHECK_TIMEOUT_SECONDS = 2.0
+_INTERNET_CHECK_CACHE_SECONDS = 30.0
+_internet_cache: Optional[Tuple[float, bool]] = None
 
 
 async def sleep_unless_stopped(stop_event: asyncio.Event, seconds: float) -> None:
@@ -96,3 +107,28 @@ async def get_throttle_status() -> Optional[ThrottleStatus]:
         under_voltage=bool(value & _UNDER_VOLTAGE_NOW_BIT),
         throttled=bool(value & _THROTTLED_NOW_BIT),
     )
+
+
+async def internet_reachable() -> bool:
+    """Whether this device currently has an internet route, checked with a
+    short TCP connect (see _INTERNET_CHECK_HOST). Result is cached for
+    _INTERNET_CHECK_CACHE_SECONDS. A failed or timed-out connect counts as
+    offline - the status display shows what it can tell, and a stale
+    "online" reading on a car deployment would be the more misleading error."""
+    global _internet_cache
+    now = time.monotonic()
+    if _internet_cache is not None and now - _internet_cache[0] < _INTERNET_CHECK_CACHE_SECONDS:
+        return _internet_cache[1]
+
+    try:
+        _, writer = await asyncio.wait_for(
+            asyncio.open_connection(_INTERNET_CHECK_HOST, _INTERNET_CHECK_PORT),
+            timeout=_INTERNET_CHECK_TIMEOUT_SECONDS,
+        )
+        writer.close()
+        reachable = True
+    except (OSError, asyncio.TimeoutError):
+        reachable = False
+
+    _internet_cache = (now, reachable)
+    return reachable

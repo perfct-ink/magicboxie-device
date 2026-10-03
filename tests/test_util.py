@@ -66,3 +66,49 @@ def test_get_throttle_status_returns_none_on_unexpected_output():
         status = asyncio.run(get_throttle_status())
 
     assert status is None
+
+
+# --- internet_reachable -----------------------------------------------------
+
+from player_app import util  # noqa: E402
+
+_CONNECT_PATCH_TARGET = "player_app.util.asyncio.open_connection"
+
+
+class FakeWriter:
+    def close(self):
+        pass
+
+
+def _fresh_internet_cache():
+    return patch.object(util, "_internet_cache", None)
+
+
+def test_internet_reachable_true_when_connect_succeeds():
+    with _fresh_internet_cache(), patch(
+        _CONNECT_PATCH_TARGET, new=AsyncMock(return_value=(None, FakeWriter()))
+    ):
+        assert asyncio.run(util.internet_reachable()) is True
+
+
+def test_internet_reachable_false_when_connect_refused():
+    with _fresh_internet_cache(), patch(
+        _CONNECT_PATCH_TARGET, new=AsyncMock(side_effect=OSError("unreachable"))
+    ):
+        assert asyncio.run(util.internet_reachable()) is False
+
+
+def test_internet_reachable_false_when_connect_times_out():
+    with _fresh_internet_cache(), patch(
+        _CONNECT_PATCH_TARGET, new=AsyncMock(side_effect=asyncio.TimeoutError())
+    ):
+        assert asyncio.run(util.internet_reachable()) is False
+
+
+def test_internet_reachable_caches_result_between_calls():
+    connect = AsyncMock(return_value=(None, FakeWriter()))
+    with _fresh_internet_cache(), patch(_CONNECT_PATCH_TARGET, new=connect):
+        assert asyncio.run(util.internet_reachable()) is True
+        assert asyncio.run(util.internet_reachable()) is True
+
+    assert connect.await_count == 1

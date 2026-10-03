@@ -18,7 +18,7 @@ from ..storage import publish_file, run_io
 from ..controllers.playback_controller import PlaybackController
 from ..models.library import VIDEO_EXTENSIONS
 from ..models.protocol import API_VERSION, Command, Movie, Opcode
-from ..util import cpu_temperature_celsius, get_throttle_status, local_ip
+from ..util import cpu_temperature_celsius, get_throttle_status, internet_reachable, local_ip
 
 _METADATA_FIELDS = ("title", "description", "year", "duration_seconds")
 
@@ -248,6 +248,7 @@ async def _get_status(request: web.Request) -> web.Response:
     controller = request.app[_CONTROLLER_KEY]
     state = await controller.refresh_status()
     throttle = await get_throttle_status()
+    online = await internet_reachable()
     return web.json_response({
         "status": state.status.name.lower(),
         "movie_id": state.movie_id,
@@ -257,6 +258,7 @@ async def _get_status(request: web.Request) -> web.Response:
         "cpu_temperature_celsius": cpu_temperature_celsius(),
         "under_voltage": throttle.under_voltage if throttle else None,
         "throttled": throttle.throttled if throttle else None,
+        "internet_reachable": online,
     })
 
 

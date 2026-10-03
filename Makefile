@@ -22,6 +22,8 @@ SERVICE_FILE := /etc/systemd/system/$(SERVICE_NAME).service
 SELF_UPDATE_NAME := magicboxie-self-update
 SELF_UPDATE_SERVICE_FILE := /etc/systemd/system/$(SELF_UPDATE_NAME).service
 SELF_UPDATE_TIMER_FILE := /etc/systemd/system/$(SELF_UPDATE_NAME).timer
+BOOT_UPDATE_NAME := magicboxie-boot-update
+BOOT_UPDATE_SERVICE_FILE := /etc/systemd/system/$(BOOT_UPDATE_NAME).service
 
 .PHONY: all setup dev build test clean seed-movies \
 	pi pi-pull pi-install pi-setup pi-seed-movies pi-run pi-test pi-service pi-start pi-stop \
@@ -107,7 +109,14 @@ pi: pi-pull pi-setup pi-service pi-self-update-service pi-wifi-service
 	$(MAKE) pi-wifi-start
 	@echo "Pi is set up, deployed, and running - check status with: make pi-logs"
 
-pi-pull:
+# Devices installed from install.sh use a sparse checkout; refresh its patterns
+# so deploy files added since the original install are checked out.
+pi-sparse-refresh:
+	@if [ "$$(git config --get core.sparseCheckout)" = "true" ]; then \
+		git sparse-checkout set --no-cone player_app deploy pyproject.toml Makefile; \
+	fi
+
+pi-pull: pi-sparse-refresh
 	git pull
 
 # System packages (mpv/ffmpeg/bluez + build headers for evdev/Pillow, curl
@@ -124,9 +133,9 @@ pi-setup:
 		fonts-dejavu-core \
 		bluez dbus \
 		curl network-manager dnsmasq-base avahi-daemon
-	@if [ "$$(hostname)" != "magicboxie-device" ]; then \
-		echo "Setting hostname to magicboxie-device (reachable as magicboxie-device.local via Avahi)..."; \
-		sudo hostnamectl set-hostname magicboxie-device; \
+	@if [ "$$(hostname)" != "magicboxie-player" ]; then \
+		echo "Setting hostname to magicboxie-player (reachable as magicboxie-player.local via Avahi)..."; \
+		sudo hostnamectl set-hostname magicboxie-player; \
 	fi
 	sudo systemctl enable --now avahi-daemon
 	sudo usermod -aG video,input,bluetooth "$$(whoami)"
@@ -254,6 +263,7 @@ pi-self-update:
 		exit 0; \
 	fi; \
 	before="$$(git rev-parse HEAD)"; \
+	$(MAKE) -s pi-sparse-refresh; \
 	if ! git pull --ff-only; then \
 		echo "pi-self-update: git pull failed (no internet?) - will retry on the next scheduled run"; \
 		exit 0; \
@@ -284,9 +294,28 @@ pi-self-update-service:
 		-e 's|@REPO_DIR@|$(CURDIR)|g' \
 		deploy/magicboxie-self-update.service.in | sudo tee $(SELF_UPDATE_SERVICE_FILE) >/dev/null
 	sudo cp deploy/magicboxie-self-update.timer.in $(SELF_UPDATE_TIMER_FILE)
+	sed \
+		-e 's|@USER@|'"$$(whoami)"'|g' \
+		-e 's|@REPO_DIR@|$(CURDIR)|g' \
+		deploy/magicboxie-boot-update.service.in | sudo tee $(BOOT_UPDATE_SERVICE_FILE) >/dev/null
 	sudo systemctl daemon-reload
 	sudo systemctl enable --now $(SELF_UPDATE_NAME).timer
+	sudo systemctl enable $(BOOT_UPDATE_NAME).service
 	@echo "Self-update timer installed and enabled - runs daily, check with: systemctl list-timers $(SELF_UPDATE_NAME).timer"
+
+# Boot-time update check: wait up to 30 seconds for internet (any interface),
+# then queue the self-update service. No internet is not an error - the
+# device just continues with the code it has; the daily timer retries later.
+pi-boot-update:
+	@for i in $$(seq 1 30); do \
+		if git ls-remote --exit-code origin HEAD >/dev/null 2>&1; then \
+			echo "pi-boot-update: internet is up, requesting self-update"; \
+			sudo systemctl --no-block start $(SELF_UPDATE_NAME).service; \
+			exit 0; \
+		fi; \
+		sleep 1; \
+	done; \
+	echo "pi-boot-update: no internet after 30 seconds - continuing without updating"
 
 pi-logs:
 	journalctl -u $(SERVICE_NAME) -f
@@ -299,7 +328,8 @@ pi-uninstall:
 	sudo rm -f /etc/systemd/system/magicboxie-hotspot.service /etc/magicboxie-hotspot-dnsmasq.conf
 	sudo systemctl disable --now $(SERVICE_NAME) 2>/dev/null || true
 	sudo systemctl disable --now $(SELF_UPDATE_NAME).timer 2>/dev/null || true
-	sudo rm -f $(SERVICE_FILE) $(SELF_UPDATE_SERVICE_FILE) $(SELF_UPDATE_TIMER_FILE)
+	sudo systemctl disable $(BOOT_UPDATE_NAME).service 2>/dev/null || true
+	sudo rm -f $(SERVICE_FILE) $(SELF_UPDATE_SERVICE_FILE) $(SELF_UPDATE_TIMER_FILE) $(BOOT_UPDATE_SERVICE_FILE)
 	sudo systemctl daemon-reload
 
 pi-clean:
