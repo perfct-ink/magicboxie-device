@@ -10,6 +10,7 @@ Wants=bluetooth.target
 Type=simple
 User=@USER@
 WorkingDirectory=@REPO_DIR@
+Environment=PYTHONPATH=@REPO_DIR@
 Environment=MAGICBOXIE_TRANSPORT=ble
 Environment=MAGICBOXIE_PORTAL_PORT=80
 Environment=MAGICBOXIE_MOVIES_DIR=@MOVIES_DIR@

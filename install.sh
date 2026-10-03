@@ -20,6 +20,7 @@ configure_sparse_checkout() {
     git -C "$INSTALL_DIR" sparse-checkout init --no-cone
     git -C "$INSTALL_DIR" sparse-checkout set --no-cone \
         player_app \
+        pi \
         deploy \
         pyproject.toml \
         Makefile

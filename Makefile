@@ -113,7 +113,7 @@ pi: pi-pull pi-setup pi-service pi-self-update-service pi-wifi-service
 # so deploy files added since the original install are checked out.
 pi-sparse-refresh:
 	@if [ "$$(git config --get core.sparseCheckout)" = "true" ]; then \
-		git sparse-checkout set --no-cone player_app deploy pyproject.toml Makefile; \
+		git sparse-checkout set --no-cone player_app pi deploy pyproject.toml Makefile; \
 	fi
 
 pi-pull: pi-sparse-refresh
@@ -124,7 +124,7 @@ pi-pull: pi-sparse-refresh
 # Adds the invoking user to the video/input/bluetooth groups it needs for
 # DRM output, keyboard Escape-to-stop, and BLE - re-login (or reboot) is
 # required for that group change to apply.
-pi-setup:
+pi-setup: pi-sparse-refresh
 	@command -v apt-get >/dev/null || { echo "apt-get not found - pi-* targets are for Raspberry Pi OS/Debian"; exit 1; }
 	sudo apt-get update
 	sudo apt-get install -y --no-install-recommends \
@@ -223,7 +223,7 @@ pi-restart:
 	sudo systemctl restart $(SERVICE_NAME)
 
 # After pulling new code: reinstall into the venv and restart the service.
-pi-redeploy: pi-service pi-wifi-service
+pi-redeploy: pi-sparse-refresh pi-service pi-wifi-service
 	sudo systemctl restart $(SERVICE_NAME)
 	$(MAKE) pi-wifi-start
 
@@ -263,15 +263,18 @@ pi-self-update:
 		exit 0; \
 	fi; \
 	before="$$(git rev-parse HEAD)"; \
+	python3 -m player_app.update_status checking $$$$; \
 	$(MAKE) -s pi-sparse-refresh; \
 	if ! git pull --ff-only; then \
 		echo "pi-self-update: git pull failed (no internet?) - will retry on the next scheduled run"; \
+		python3 -m player_app.update_status clear $$$$; \
 		exit 0; \
 	fi; \
 	after="$$(git rev-parse HEAD)"; \
 	installed="$$(cat .git/magicboxie-installed-revision 2>/dev/null)"; \
 	if [ "$$installed" = "$$after" ]; then \
 		echo "pi-self-update: already up to date"; \
+		python3 -m player_app.update_status current $$$$; \
 	else \
 		echo "pi-self-update: $$before -> $$after, waiting for playback to be idle before redeploying"; \
 		python3 -m player_app.update_status waiting $$$$; \
@@ -305,15 +308,18 @@ pi-self-update-service:
 # then queue the self-update service. No internet is not an error - the
 # device just continues with the code it has; the daily timer retries later.
 pi-boot-update:
-	@for i in $$(seq 1 30); do \
+	@python3 -m player_app.update_status internet $$$$; \
+	for i in $$(seq 1 30); do \
 		if git -c safe.directory="$(CURDIR)" ls-remote --exit-code origin HEAD >/dev/null 2>&1; then \
 			echo "pi-boot-update: internet is up, requesting self-update"; \
+			python3 -m player_app.update_status clear-boot $$$$; \
 			systemctl --no-block start $(SELF_UPDATE_NAME).service; \
 			exit 0; \
 		fi; \
 		sleep 1; \
 	done; \
-	echo "pi-boot-update: no internet after 30 seconds - continuing without updating"
+	echo "pi-boot-update: no internet after 30 seconds - continuing without updating"; \
+	python3 -m player_app.update_status no_internet $$$$
 
 pi-logs:
 	journalctl -u $(SERVICE_NAME) -f

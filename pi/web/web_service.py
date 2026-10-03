@@ -13,12 +13,12 @@ from pathlib import Path
 
 from aiohttp import web
 
-from .portal import PAGE, PORTAL_URL
-from ..storage import publish_file, run_io
-from ..controllers.playback_controller import PlaybackController
-from ..models.library import VIDEO_EXTENSIONS
-from ..models.protocol import API_VERSION, Command, Movie, Opcode
-from ..util import cpu_temperature_celsius, get_throttle_status, internet_reachable, local_ip
+from .portal import PAGE, PORTAL_URL, STATIC_DIR
+from player_app.storage import publish_file, run_io
+from player_app.controllers.playback_controller import PlaybackController
+from player_app.models.library import VIDEO_EXTENSIONS
+from player_app.models.protocol import API_VERSION, Command, Movie, Opcode
+from player_app.util import cpu_temperature_celsius, get_throttle_status, internet_reachable, local_ip
 
 _METADATA_FIELDS = ("title", "description", "year", "duration_seconds")
 
@@ -39,6 +39,8 @@ def create_app(controller: PlaybackController) -> web.Application:
     app[_CONTROLLER_KEY] = controller
 
     app.router.add_get("/", _get_portal)
+    app.router.add_static("/static/", STATIC_DIR)
+    app.on_response_prepare.append(_revalidate_static)
     app.router.add_get("/api/movies", _get_movies)
     app.router.add_post("/api/movies", _post_movie)
     app.router.add_delete("/api/movies/{id}", _delete_movie)
@@ -53,6 +55,13 @@ def create_app(controller: PlaybackController) -> web.Application:
     # HTML redirect (rather than their expected success response) opens login.
     app.router.add_get("/{path:.*}", _redirect_to_portal)
     return app
+
+
+async def _revalidate_static(request: web.Request, response: web.StreamResponse) -> None:
+    # Files are small and local; revalidate (ETag) so an updated device never
+    # serves a phone stale JS/CSS.
+    if request.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache"
 
 
 async def _get_portal(request: web.Request) -> web.Response:

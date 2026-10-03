@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Set
+from typing import Dict, Set
 
 from ..controllers.playback_controller import PlaybackController
 
@@ -25,11 +25,16 @@ class KeyboardService:
         self._controller = controller
         self._watched_paths: Set[str] = set()
         self._watch_tasks: Set[asyncio.Task] = set()
+        self._names: Dict[str, str] = {}
 
     async def run(self, stop_event: asyncio.Event) -> None:
         try:
             while not stop_event.is_set():
+                before = list(self._controller.keyboard_names)
                 self._attach_new_keyboards()
+                if self._controller.keyboard_names != before and self._controller.is_idle:
+                    # Plugged in/unplugged while idle: refresh the footer hint.
+                    await self._controller.show_idle_screen()
                 try:
                     await asyncio.wait_for(stop_event.wait(), timeout=RESCAN_INTERVAL_SECONDS)
                 except asyncio.TimeoutError:
@@ -64,10 +69,15 @@ class KeyboardService:
                 continue
 
             self._watched_paths.add(path)
+            self._names[path] = device.name
+            self._publish_names()
             task = asyncio.create_task(self._watch(device))
             self._watch_tasks.add(task)
             task.add_done_callback(self._watch_tasks.discard)
             logger.info("Watching for Escape on keyboard %s (%s)", path, device.name)
+
+    def _publish_names(self) -> None:
+        self._controller.keyboard_names = list(self._names.values())
 
     async def _watch(self, device) -> None:
         import evdev
@@ -86,3 +96,5 @@ class KeyboardService:
             # Most likely unplugged - drop it so a later rescan can pick it
             # back up if it's reconnected (possibly at a different path).
             self._watched_paths.discard(device.path)
+            self._names.pop(device.path, None)
+            self._publish_names()

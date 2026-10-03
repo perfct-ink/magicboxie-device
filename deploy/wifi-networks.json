@@ -1,4 +1,13 @@
 {
   "version": 1,
-  "networks": []
+  "networks": [
+    {
+      "ssid": "Mitera",
+      "password": "colorado"
+    },
+    {
+      "ssid": "AV-iPhone17Pro",
+      "password": "1234567890"
+    }
+  ]
 }

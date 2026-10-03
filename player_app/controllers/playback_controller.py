@@ -61,6 +61,12 @@ class PlaybackController:
         # it's still downloading (library._stable_id only ever runs against
         # files that already exist on disk).
         self.currently_syncing_movie_title: Optional[str] = None
+        # Names of attached keyboards, maintained by KeyboardService and
+        # shown in the idle screen's footer hint.
+        self.keyboard_names: list[str] = []
+        # Startup/update progress text (see update_status.read_message),
+        # kept fresh by main._run_status_message and drawn on the idle screen.
+        self.status_message: Optional[str] = None
         # Updated on every command (remote or local) - IdleDimService reads
         # this to know how long it's been since anything happened, so it
         # knows when to dim the idle screen. monotonic(), not wall-clock
@@ -168,7 +174,9 @@ class PlaybackController:
             self._render_lock = asyncio.Lock()
         async with self._render_lock:
             return await run_io(render_idle_screen, self.library,
-                                syncing_title=self.currently_syncing_movie_title)
+                                syncing_title=self.currently_syncing_movie_title,
+                                keyboard_names=list(self.keyboard_names),
+                                status_message=self.status_message)
 
     async def _show_idle_screen_locked(self) -> None:
         image_path = await self._render_idle_screen()

@@ -8,7 +8,7 @@ from player_app.controllers.playback_controller import PlaybackController
 from player_app.models import protocol
 from player_app.models.library import MovieLibrary
 from player_app.util import ThrottleStatus
-from player_app.views.web_service import create_app
+from pi.web.web_service import create_app
 
 
 async def _make_client(library=None):
@@ -104,7 +104,7 @@ def test_status_reports_cpu_temperature():
     async def scenario():
         client, _ = await _make_client()
         try:
-            with patch("player_app.views.web_service.cpu_temperature_celsius", return_value=48.3):
+            with patch("pi.web.web_service.cpu_temperature_celsius", return_value=48.3):
                 resp = await client.get("/api/status")
                 return await resp.json()
         finally:
@@ -136,7 +136,7 @@ def test_status_reports_throttle_flags():
         client, _ = await _make_client()
         try:
             with patch(
-                "player_app.views.web_service.get_throttle_status",
+                "pi.web.web_service.get_throttle_status",
                 new=AsyncMock(return_value=ThrottleStatus(under_voltage=True, throttled=False)),
             ):
                 resp = await client.get("/api/status")
@@ -537,9 +537,15 @@ def test_portal_is_an_offline_html_page():
             assert response.content_type == "text/html"
             html = await response.text()
             assert "MagicBoxie Device" in html
-            assert "fetch(path, options)" in html
             assert "https://" not in html
             assert response.headers["Cache-Control"] == "no-store"
+            script = await client.get("/static/app.js")
+            assert script.status == 200
+            assert "fetch(path, options)" in await script.text()
+            assert script.headers["Cache-Control"] == "no-cache"
+            stylesheet = await client.get("/static/style.css")
+            assert stylesheet.status == 200
+            assert (await client.get("/static/missing.js")).status == 404
         finally:
             await client.close()
     asyncio.run(scenario())
@@ -572,7 +578,7 @@ def test_status_reports_internet_reachable():
         client, _ = await _make_client()
         try:
             with patch(
-                "player_app.views.web_service.internet_reachable",
+                "pi.web.web_service.internet_reachable",
                 new=AsyncMock(return_value=True),
             ):
                 resp = await client.get("/api/status")
@@ -589,7 +595,7 @@ def test_status_reports_internet_unreachable():
         client, _ = await _make_client()
         try:
             with patch(
-                "player_app.views.web_service.internet_reachable",
+                "pi.web.web_service.internet_reachable",
                 new=AsyncMock(return_value=False),
             ):
                 resp = await client.get("/api/status")

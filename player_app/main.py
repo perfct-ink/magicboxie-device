@@ -25,7 +25,7 @@ from typing import List
 from .controllers.playback_controller import PlaybackController
 from .models.library import MovieLibrary
 from .models.player import MpvController
-from .update_status import read_status
+from .update_status import read_message, read_status
 from .storage import run_io
 from .util import local_ip, sleep_unless_stopped
 
@@ -108,6 +108,7 @@ async def _run() -> None:
         workers = [
             _run_http(controller, stop_event),
             _run_keyboard(controller, stop_event),
+            _run_status_message(controller, stop_event),
             _run_mdns(stop_event),
             controller.show_idle_screen(),
             _run_library_scan(controller, stop_event, prepared=True),
@@ -156,7 +157,7 @@ async def _prepare_startup(library: MovieLibrary, player: MpvController) -> None
 async def _run_http(controller: PlaybackController, stop_event: asyncio.Event) -> None:
     from aiohttp import web
 
-    from .views.web_service import create_app
+    from pi.web.web_service import create_app
 
     app = create_app(controller)
     runner = web.AppRunner(app)
@@ -243,6 +244,18 @@ async def _run_idle_dim(controller: PlaybackController, stop_event: asyncio.Even
     from .views.idle_dim_service import IdleDimService
 
     await IdleDimService(controller).run(stop_event)
+
+
+async def _run_status_message(controller: PlaybackController, stop_event: asyncio.Event) -> None:
+    """Shows internet/update progress (written by the boot-update and
+    self-update processes) in the idle screen's footer."""
+    while not stop_event.is_set():
+        message = await run_io(read_message)
+        if message != controller.status_message:
+            controller.status_message = message
+            if controller.is_idle:
+                await controller.show_idle_screen()
+        await sleep_unless_stopped(stop_event, 2)
 
 
 async def _run_keyboard(controller: PlaybackController, stop_event: asyncio.Event) -> None:

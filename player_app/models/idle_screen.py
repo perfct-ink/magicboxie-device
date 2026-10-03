@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from io import BytesIO
 from pathlib import Path
+from typing import Sequence
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -58,6 +59,16 @@ _SYNC_LABEL_FONT_SIZE = 15
 _SYNC_LABEL_MAX_WIDTH = 360
 _SYNC_DOT_DIAMETER = 10
 
+# Footer lines: update/internet progress and whether a keyboard is attached
+# (and what Escape does). Plain ASCII/em-dash only (DejaVu Sans covers it).
+_HINT_LINE_HEIGHT = 40
+_HINT_PADDING = 16
+_HINT_FONT_SIZE = 20
+_STATUS_COLOR = (200, 200, 200)
+_HINT_FOUND_COLOR = (120, 200, 120)
+_HINT_MISSING_COLOR = (245, 197, 66)
+_MIN_CANVAS_WIDTH = _COLUMNS * _CELL_WIDTH
+
 
 def _load_caption_font() -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     try:
@@ -74,16 +85,26 @@ def _load_sync_badge_font() -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
 
 
 def render_idle_screen(
-    library: MovieLibrary, output_path: Path = IDLE_SCREEN_PATH, syncing_title: str | None = None
+    library: MovieLibrary,
+    output_path: Path = IDLE_SCREEN_PATH,
+    syncing_title: str | None = None,
+    keyboard_names: Sequence[str] | None = None,
+    status_message: str | None = None,
 ) -> Path:
     """(Re)builds the grid from the library's current movies/thumbnails.
     Cheap enough - a handful of small images composited together - to just
     regenerate on demand each time it's shown rather than caching and
-    invalidating it as the library changes."""
+    invalidating it as the library changes. keyboard_names (None = unknown,
+    draws nothing) adds a footer saying whether a keyboard is detected."""
     movies = library.movies
     columns = _COLUMNS if movies else 1
     rows = max(1, -(-len(movies) // columns))  # ceil division
-    canvas = Image.new("RGB", (columns * _CELL_WIDTH, rows * _CELL_HEIGHT), _BACKGROUND)
+    grid_height = rows * _CELL_HEIGHT
+    footer = _footer_lines(keyboard_names, status_message)
+    footer_height = len(footer) * _HINT_LINE_HEIGHT + _HINT_PADDING if footer else 0
+    canvas = Image.new(
+        "RGB", (max(columns * _CELL_WIDTH, _MIN_CANVAS_WIDTH), grid_height + footer_height), _BACKGROUND
+    )
     draw = ImageDraw.Draw(canvas)
     font = _load_caption_font()
 
@@ -100,10 +121,43 @@ def render_idle_screen(
     if syncing_title:
         _draw_sync_badge(canvas, draw, syncing_title)
 
+    _draw_footer(canvas, draw, footer, grid_height)
+
     image_bytes = BytesIO()
     canvas.save(image_bytes, format="PNG")
     atomic_write(output_path, image_bytes.getvalue())
     return output_path
+
+
+def _footer_lines(keyboard_names: Sequence[str] | None, status_message: str | None) -> list:
+    lines = []
+    if status_message:
+        lines.append((status_message, _STATUS_COLOR))
+    if keyboard_names:
+        lines.append((
+            f"Keyboard detected ({keyboard_names[0]}) \u2014 press Esc during a movie to stop and return here",
+            _HINT_FOUND_COLOR,
+        ))
+    elif keyboard_names is not None:
+        lines.append((
+            "No keyboard detected \u2014 plug in a USB keyboard to use Esc to stop a movie",
+            _HINT_MISSING_COLOR,
+        ))
+    return lines
+
+
+def _draw_footer(canvas: Image.Image, draw: ImageDraw.ImageDraw, lines: list, top: int) -> None:
+    if not lines:
+        return
+    try:
+        font = ImageFont.truetype(_CAPTION_FONT_PATH, _HINT_FONT_SIZE)
+    except OSError:
+        font = ImageFont.load_default()
+    for index, (text, color) in enumerate(lines):
+        text = _truncate_to_width(text, draw, font, canvas.width - 2 * _CELL_PADDING)
+        x = (canvas.width - draw.textlength(text, font=font)) / 2
+        y = top + _HINT_PADDING // 2 + index * _HINT_LINE_HEIGHT + (_HINT_LINE_HEIGHT - _HINT_FONT_SIZE) // 2
+        draw.text((x, y), text, fill=color, font=font)
 
 
 def _draw_sync_badge(canvas: Image.Image, draw: ImageDraw.ImageDraw, title: str) -> None:

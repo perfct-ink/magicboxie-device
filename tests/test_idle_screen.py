@@ -73,3 +73,20 @@ def test_render_idle_screen_composites_real_thumbnails(tmp_path):
     with Image.open(output_path) as image:
         colors = image.convert("RGB").getcolors(maxcolors=1_000_000)
     assert any(r > 200 and g < 60 and b < 60 for _count, (r, g, b) in colors)
+
+
+def test_render_idle_screen_footer_grows_with_keyboard_and_status_lines(tmp_path):
+    def height(**kwargs):
+        path = tmp_path / "idle.png"
+        render_idle_screen(_EmptyLibrary(), output_path=path, **kwargs)
+        with Image.open(path) as image:
+            return image.height
+
+    base = height()
+    with_keyboard = height(keyboard_names=["Test Keyboard"])
+    no_keyboard = height(keyboard_names=[])
+    with_status = height(keyboard_names=[], status_message="Checking for internet…")
+
+    assert with_keyboard > base
+    assert no_keyboard == with_keyboard
+    assert with_status > no_keyboard

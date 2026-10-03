@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#141414">
+<title>MagicBoxie Device</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header><span class="logo">MagicBoxie</span><span id="conn">Connecting…</span></header>
+<main>
+<section class="hero hidden" id="hero"><img id="heroImg" alt=""><div class="info"><div class="label">Now playing</div><div class="title" id="heroTitle"></div></div></section>
+<input id="search" type="search" placeholder="Search movies" aria-label="Search movies" autocomplete="off">
+<h2>Movies</h2>
+<div id="grid"><div class="empty">Loading movies…</div></div>
+</main>
+<div id="sheet" class="hidden" role="dialog" aria-modal="true"><div class="panel" id="panel"></div></div>
+<div id="bar" class="hidden">
+<div class="top"><div class="t" id="barTitle"></div>
+<button class="ic s" id="back" aria-label="Back 15 seconds">⟲</button>
+<button class="ic" id="toggle" aria-label="Play or pause">❚❚</button>
+<button class="ic s" id="fwd" aria-label="Forward 15 seconds">⟳</button>
+<button class="ic s" id="stop" aria-label="Stop">■</button></div>
+<input id="seek" type="range" min="0" max="0" value="0" aria-label="Seek">
+<div id="toast" role="status"></div>
+</div>
+<script src="/static/app.js"></script>
+</body></html>
