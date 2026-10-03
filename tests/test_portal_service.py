@@ -11,7 +11,7 @@ def test_http_serves_api_and_portal_and_cleans_up():
         runner = MagicMock(setup=AsyncMock(), cleanup=AsyncMock())
         site = MagicMock(start=AsyncMock())
         with patch.object(main, "HTTP_PORT", 8000), patch.object(main, "PORTAL_PORT", 80), \
-                patch("pi.web.web_service.create_app", return_value=object()), \
+                patch("web.web_service.create_app", return_value=object()), \
                 patch("aiohttp.web.AppRunner", return_value=runner), \
                 patch("aiohttp.web.TCPSite", return_value=site) as make_site:
             await main._run_http(MagicMock(), stop)
@@ -27,7 +27,7 @@ def test_portal_bind_failure_cleans_up_existing_api_listener():
         runner = MagicMock(setup=AsyncMock(), cleanup=AsyncMock())
         site = MagicMock(start=AsyncMock(side_effect=[None, OSError("port in use")]))
         with patch.object(main, "HTTP_PORT", 8000), patch.object(main, "PORTAL_PORT", 80), \
-                patch("pi.web.web_service.create_app", return_value=object()), \
+                patch("web.web_service.create_app", return_value=object()), \
                 patch("aiohttp.web.AppRunner", return_value=runner), \
                 patch("aiohttp.web.TCPSite", return_value=site):
             try:

@@ -19,11 +19,8 @@ INSTALL_DIR="${MAGICBOXIE_INSTALL_DIR:-$HOME/magicboxie-device}"
 configure_sparse_checkout() {
     git -C "$INSTALL_DIR" sparse-checkout init --no-cone
     git -C "$INSTALL_DIR" sparse-checkout set --no-cone \
-        player_app \
-        pi \
-        deploy \
-        pyproject.toml \
-        Makefile
+        /pi/ \
+        /Makefile
 }
 
 if ! command -v git >/dev/null 2>&1; then

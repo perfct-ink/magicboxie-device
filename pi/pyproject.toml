@@ -31,7 +31,7 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["player_app*", "pi*"]
+include = ["player_app*", "web*"]
 
 [tool.setuptools.package-data]
-"pi.web" = ["*.html", "static/*"]
+"web" = ["*.html", "static/*"]

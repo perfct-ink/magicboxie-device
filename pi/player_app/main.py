@@ -157,7 +157,7 @@ async def _prepare_startup(library: MovieLibrary, player: MpvController) -> None
 async def _run_http(controller: PlaybackController, stop_event: asyncio.Event) -> None:
     from aiohttp import web
 
-    from pi.web.web_service import create_app
+    from web.web_service import create_app
 
     app = create_app(controller)
     runner = web.AppRunner(app)

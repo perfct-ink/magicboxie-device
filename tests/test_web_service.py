@@ -8,7 +8,7 @@ from player_app.controllers.playback_controller import PlaybackController
 from player_app.models import protocol
 from player_app.models.library import MovieLibrary
 from player_app.util import ThrottleStatus
-from pi.web.web_service import create_app
+from web.web_service import create_app
 
 
 async def _make_client(library=None):
@@ -104,7 +104,7 @@ def test_status_reports_cpu_temperature():
     async def scenario():
         client, _ = await _make_client()
         try:
-            with patch("pi.web.web_service.cpu_temperature_celsius", return_value=48.3):
+            with patch("web.web_service.cpu_temperature_celsius", return_value=48.3):
                 resp = await client.get("/api/status")
                 return await resp.json()
         finally:
@@ -136,7 +136,7 @@ def test_status_reports_throttle_flags():
         client, _ = await _make_client()
         try:
             with patch(
-                "pi.web.web_service.get_throttle_status",
+                "web.web_service.get_throttle_status",
                 new=AsyncMock(return_value=ThrottleStatus(under_voltage=True, throttled=False)),
             ):
                 resp = await client.get("/api/status")
@@ -578,7 +578,7 @@ def test_status_reports_internet_reachable():
         client, _ = await _make_client()
         try:
             with patch(
-                "pi.web.web_service.internet_reachable",
+                "web.web_service.internet_reachable",
                 new=AsyncMock(return_value=True),
             ):
                 resp = await client.get("/api/status")
@@ -595,7 +595,7 @@ def test_status_reports_internet_unreachable():
         client, _ = await _make_client()
         try:
             with patch(
-                "pi.web.web_service.internet_reachable",
+                "web.web_service.internet_reachable",
                 new=AsyncMock(return_value=False),
             ):
                 resp = await client.get("/api/status")
@@ -611,9 +611,9 @@ def test_info_reports_device_details():
     async def scenario():
         client, _ = await _make_client()
         try:
-            with patch("pi.web.web_service.get_throttle_status", new=AsyncMock(return_value=None)), \
-                    patch("pi.web.web_service.internet_reachable", new=AsyncMock(return_value=True)), \
-                    patch("pi.web.web_service.system_info.snapshot",
+            with patch("web.web_service.get_throttle_status", new=AsyncMock(return_value=None)), \
+                    patch("web.web_service.internet_reachable", new=AsyncMock(return_value=True)), \
+                    patch("web.web_service.system_info.snapshot",
                           return_value={"hostname": "magicboxie-player", "mdns_name": "magicboxie-player.local"}):
                 response = await client.get("/api/info")
                 assert response.status == 200
@@ -633,7 +633,7 @@ def test_reboot_reports_success_and_failure():
     async def scenario(error):
         client, _ = await _make_client()
         try:
-            with patch("pi.web.web_service.system_info.reboot", new=AsyncMock(return_value=error)):
+            with patch("web.web_service.system_info.reboot", new=AsyncMock(return_value=error)):
                 response = await client.post("/api/reboot")
                 return response.status, await response.json()
         finally:

@@ -11,16 +11,26 @@ The development Mac's SSH alias `pi` resolves to `192.168.86.27`, hostname
 server**, not the target device. Do not deploy device changes through that
 alias until it has been pointed at the correct Pi.
 
-On October 3, 2026, `192.168.86.57` resolved to `magicboxie-player.lan` and
-responded to the device API at `http://192.168.86.57:8000/api/version`, reporting
-its own IP as `192.168.86.57`. Ports 22 and 8000 were open; port 80 was closed.
-This is the device candidate to use instead of the home server.
+On October 3, 2026, the device was verified over password-authenticated SSH:
 
-The SSH account has not yet been confirmed. Key authentication as `admin`
-failed, so hardware, service state, and checkout paths have not been inspected
-on this host. Replace `DEVICE_USER` in the commands below with its actual
-account and `DEVICE_IP` with `192.168.86.57` (or its current address). The
-bootstrap's default checkout is `~/magicboxie-device` under that account.
+| Item | Value |
+| --- | --- |
+| LAN address | `192.168.86.57` |
+| SSH account | `admin` |
+| Hardware | Raspberry Pi Zero 2 W Rev 1.0 |
+| Hostname | `magicboxie-player` (`magicboxie-player.local`) |
+| Checkout | `/home/admin/magicboxie-device` |
+| Connection | Ethernet (`eth0`) |
+| Daemon | `magicboxie-device.service`, active |
+| Open ports checked | SSH 22 and device HTTP API 8000 |
+
+Connect using `ssh admin@192.168.86.57` and the supplied device password.
+Key authentication was not available. Replace `DEVICE_USER` in the commands
+below with `admin` and `DEVICE_IP` with `192.168.86.57` (or its current address).
+The API's `/api/version` endpoint reports that same LAN address. Port 80 was
+closed, and the Wi-Fi startup and self-update units were not installed yet.
+The OS detected an Apple Magic Keyboard with Numeric Keypad at
+`/dev/input/event0`; the daemon logged that it was watching for Escape.
 
 Look for the service `MagicBoxieDevice._magicboxie._tcp.local.`. The home
 server also advertised that name with an unusable `127.0.0.1` address; neither
@@ -29,8 +39,7 @@ Verify the responding host and hardware over SSH before deploying.
 
 The home server had a running `magicboxie-device.service` on port 8000 and
 nginx on port 80. Its Wi-Fi startup and self-update units were absent. Those
-observations describe the home server, not the other Pi. The target's installed
-version and service state still need verification.
+observations describe the home server, not the other Pi. The target's current service state is listed above.
 
 Changes present only in a development working tree cannot reach the Pi through
 `git pull`; commit and push the intended release before using Git deployment.
@@ -70,8 +79,9 @@ curl -fsSL https://raw.githubusercontent.com/kriogenx0/magicboxie-device/main/in
 The bootstrap script defaults to branch `main` and `~/magicboxie-device`.
 `MAGICBOXIE_REF` and `MAGICBOXIE_INSTALL_DIR` can override these defaults.
 It installs Git if needed and creates a shallow sparse checkout containing
-`player_app`, `deploy`, `pyproject.toml`, and `Makefile`. It then runs
-`make pi-install`.
+`pi/` (everything deployed to the device) and the root `Makefile`, which
+forwards `pi-*` targets to `pi/Makefile`. It then runs `make pi-install`.
+The service, virtualenv, and updater all run from `pi/` in the checkout.
 
 On an existing checkout, bootstrap fetches the selected branch and resets
 tracked files to the remote version. Preserve local edits before rerunning
@@ -136,7 +146,7 @@ that service to an older device.
 
 ## Saved Wi-Fi and startup behavior
 
-The tracked seed file is `deploy/wifi-networks.json`. The installer copies it
+The tracked seed file is `pi/deploy/wifi-networks.json`. The installer copies it
 to `/var/lib/magicboxie/wifi-networks.json` only if the runtime file is absent.
 Existing runtime credentials survive installation, Git updates, and reboots.
 The runtime file has mode `600` and belongs to the device account. The tracked
