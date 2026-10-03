@@ -1,0 +1,14 @@
+[Unit]
+Description=MagicBoxie open Wi-Fi hotspot and captive portal DNS
+Requires=NetworkManager.service
+After=NetworkManager.service
+
+[Service]
+Type=simple
+StateDirectory=magicboxie-hotspot
+ExecStartPre=-/usr/sbin/rfkill unblock wifi
+ExecStartPre=/usr/bin/nmcli --wait 30 connection up magicboxie-hotspot
+ExecStart=/usr/sbin/dnsmasq --keep-in-foreground --conf-file=/etc/magicboxie-hotspot-dnsmasq.conf
+Restart=on-failure
+RestartSec=5
+

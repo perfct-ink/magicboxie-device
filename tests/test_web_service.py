@@ -526,3 +526,42 @@ def test_delete_movie_stops_playback_first_if_currently_selected():
     # from under active playback) without depending on FakeMpv.idle, which
     # goes back to False once the idle-screen image itself gets "loaded".
     assert controller.player.shown_image_path is not None
+
+
+def test_portal_is_an_offline_html_page():
+    async def scenario():
+        client, _ = await _make_client()
+        try:
+            response = await client.get("/")
+            assert response.status == 200
+            assert response.content_type == "text/html"
+            html = await response.text()
+            assert "MagicBoxie Device" in html
+            assert "fetch(path, options)" in html
+            assert "https://" not in html
+            assert response.headers["Cache-Control"] == "no-store"
+        finally:
+            await client.close()
+    asyncio.run(scenario())
+
+
+def test_captive_portal_probes_redirect_to_fixed_device_address():
+    async def scenario():
+        client, _ = await _make_client()
+        try:
+            for path in ("/generate_204", "/gen_204", "/hotspot-detect.html",
+                         "/library/test/success.html", "/connecttest.txt",
+                         "/ncsi.txt", "/redirect", "/unknown?next=https://example.com"):
+                response = await client.get(path, headers={"Host": "untrusted.example"}, allow_redirects=False)
+                assert response.status == 302
+                assert response.headers["Location"] == "http://10.42.0.1/"
+                assert response.headers["Cache-Control"] == "no-store"
+            response = await client.head("/generate_204", allow_redirects=False)
+            assert response.status == 302
+            response = await client.get("/api/unknown", allow_redirects=False)
+            assert response.status == 404
+            response = await client.get("/api/movies", headers={"Host": "10.42.0.1"})
+            assert response.status == 200
+        finally:
+            await client.close()
+    asyncio.run(scenario())

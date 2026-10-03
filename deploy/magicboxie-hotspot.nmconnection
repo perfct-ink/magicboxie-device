@@ -1,0 +1,19 @@
+[connection]
+id=magicboxie-hotspot
+type=wifi
+interface-name=wlan0
+autoconnect=false
+
+[wifi]
+mode=ap
+ssid=MagicBoxie Device
+band=bg
+hidden=false
+
+[ipv4]
+method=manual
+address1=10.42.0.1/24
+never-default=true
+
+[ipv6]
+method=disabled

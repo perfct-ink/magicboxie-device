@@ -13,6 +13,7 @@ from pathlib import Path
 
 from aiohttp import web
 
+from .portal import PAGE, PORTAL_URL
 from ..storage import publish_file, run_io
 from ..controllers.playback_controller import PlaybackController
 from ..models.library import VIDEO_EXTENSIONS
@@ -37,6 +38,7 @@ def create_app(controller: PlaybackController) -> web.Application:
     app = web.Application(client_max_size=_MAX_UPLOAD_BYTES)
     app[_CONTROLLER_KEY] = controller
 
+    app.router.add_get("/", _get_portal)
     app.router.add_get("/api/movies", _get_movies)
     app.router.add_post("/api/movies", _post_movie)
     app.router.add_delete("/api/movies/{id}", _delete_movie)
@@ -47,7 +49,20 @@ def create_app(controller: PlaybackController) -> web.Application:
     app.router.add_get("/api/status", _get_status)
     app.router.add_post("/api/command", _post_command)
     app.router.add_get("/api/version", _get_version)
+    # Android, Apple, and Windows probe different HTTP paths. An unexpected
+    # HTML redirect (rather than their expected success response) opens login.
+    app.router.add_get("/{path:.*}", _redirect_to_portal)
     return app
+
+
+async def _get_portal(request: web.Request) -> web.Response:
+    return web.Response(text=PAGE, content_type="text/html", headers={"Cache-Control": "no-store"})
+
+
+async def _redirect_to_portal(request: web.Request) -> web.Response:
+    if request.path.startswith("/api/"):
+        raise web.HTTPNotFound()
+    raise web.HTTPFound(PORTAL_URL, headers={"Cache-Control": "no-store"})
 
 
 def _movie_payload(controller: PlaybackController, movie: Movie) -> dict:

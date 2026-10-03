@@ -8,6 +8,9 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from ..storage import run_io
+from ..wifi_networks import save_network
+
 logger = logging.getLogger(__name__)
 
 
@@ -26,6 +29,11 @@ async def apply_wifi_credentials(ssid: str, password: str) -> bool:
     )
     _, stderr = await process.communicate()
     if process.returncode == 0:
+        try:
+            await run_io(save_network, ssid, password)
+        except (OSError, ValueError):
+            logger.error("Connected to WiFi but could not persist its credentials")
+            return False
         logger.info("Connected to WiFi network %r", ssid)
         return True
     logger.warning("Failed to connect to WiFi network %r: %s", ssid, stderr.decode(errors="replace").strip())

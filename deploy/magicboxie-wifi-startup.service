@@ -1,0 +1,14 @@
+[Unit]
+Description=MagicBoxie saved Wi-Fi startup with 30-second hotspot fallback
+Requires=NetworkManager.service
+After=NetworkManager.service
+
+[Service]
+Type=oneshot
+ExecStartPre=-/usr/sbin/rfkill unblock wifi
+ExecStart=/usr/bin/python3 /usr/local/lib/magicboxie/wifi_startup.py
+TimeoutStartSec=90
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

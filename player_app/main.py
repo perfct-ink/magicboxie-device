@@ -46,6 +46,8 @@ PLAYBACK_STATE_PATH = THUMBNAIL_DIR / "playback_state.json"
 # e.g. when there's no BlueZ available such as Docker Desktop on macOS).
 TRANSPORT = os.environ.get("MAGICBOXIE_TRANSPORT", "ble")
 HTTP_PORT = int(os.environ.get("MAGICBOXIE_HTTP_PORT", "8000"))
+# Pi installs enable port 80 for captive-portal probes; dev needs no privilege.
+PORTAL_PORT = int(os.environ.get("MAGICBOXIE_PORTAL_PORT", "0"))
 
 # bluez expires an advert after its Timeout elapses; re-registering periodically
 # (well before that) keeps the device discoverable indefinitely.
@@ -159,12 +161,15 @@ async def _run_http(controller: PlaybackController, stop_event: asyncio.Event) -
     app = create_app(controller)
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", HTTP_PORT)
-    await site.start()
-    logger.info("Serving MagicBoxie web API on port %d", HTTP_PORT)
-
-    await stop_event.wait()
-    await runner.cleanup()
+    try:
+        await web.TCPSite(runner, "0.0.0.0", HTTP_PORT).start()
+        logger.info("Serving MagicBoxie web API on port %d", HTTP_PORT)
+        if PORTAL_PORT and PORTAL_PORT != HTTP_PORT:
+            await web.TCPSite(runner, "0.0.0.0", PORTAL_PORT).start()
+            logger.info("Serving MagicBoxie captive portal on port %d", PORTAL_PORT)
+        await stop_event.wait()
+    finally:
+        await runner.cleanup()
 
 
 async def _run_mdns(stop_event: asyncio.Event) -> None:

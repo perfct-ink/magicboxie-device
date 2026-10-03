@@ -19,10 +19,12 @@ class FakeProcess:
 
 
 def test_apply_wifi_credentials_calls_nmcli_with_the_given_network(tmp_path):
-    with patch(_PATCH_TARGET, new=AsyncMock(return_value=FakeProcess())) as mock_exec:
+    with patch("player_app.views.wifi_provisioning.save_network") as save, \
+            patch(_PATCH_TARGET, new=AsyncMock(return_value=FakeProcess())) as mock_exec:
         result = asyncio.run(apply_wifi_credentials("MyHotspot", "hunter2"))
 
     assert result is True
+    save.assert_called_once_with("MyHotspot", "hunter2")
     mock_exec.assert_awaited_once_with(
         "nmcli", "dev", "wifi", "connect", "MyHotspot", "password", "hunter2",
         stdout=asyncio.subprocess.PIPE,

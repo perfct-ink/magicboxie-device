@@ -26,7 +26,7 @@ SELF_UPDATE_TIMER_FILE := /etc/systemd/system/$(SELF_UPDATE_NAME).timer
 .PHONY: all setup dev build test clean seed-movies \
 	pi pi-pull pi-install pi-setup pi-seed-movies pi-run pi-test pi-service pi-start pi-stop \
 	pi-restart pi-redeploy pi-wait-until-idle pi-self-update pi-self-update-service pi-logs \
-	pi-uninstall pi-clean
+	pi-uninstall pi-clean pi-wifi-service pi-wifi-start
 
 all: dev
 
@@ -92,7 +92,7 @@ clean:
 # unit file's SupplementaryGroups, so it doesn't need the installing shell's
 # own group membership to have refreshed - that only matters if you
 # separately use `make pi-run`.)
-pi-install: pi-setup pi-seed-movies pi-service pi-self-update-service pi-start
+pi-install: pi-setup pi-seed-movies pi-service pi-self-update-service pi-wifi-service pi-start pi-wifi-start
 	@echo "pi-install complete - MagicBoxie is running and will start automatically on boot."
 	@echo "Check status with: make pi-logs"
 
@@ -102,8 +102,9 @@ pi-install: pi-setup pi-seed-movies pi-service pi-self-update-service pi-start
 # (covers changes to either deploy/*.in template), and restarts. Every step
 # is idempotent, so this is safe to re-run any time you've pushed changes
 # and want the Pi caught up and running them.
-pi: pi-pull pi-setup pi-service pi-self-update-service
+pi: pi-pull pi-setup pi-service pi-self-update-service pi-wifi-service
 	sudo systemctl restart $(SERVICE_NAME)
+	$(MAKE) pi-wifi-start
 	@echo "Pi is set up, deployed, and running - check status with: make pi-logs"
 
 pi-pull:
@@ -122,13 +123,24 @@ pi-setup:
 		mpv ffmpeg libjpeg-dev zlib1g-dev \
 		fonts-dejavu-core \
 		bluez dbus \
-		curl
+		curl network-manager dnsmasq-base avahi-daemon
+	@if [ "$$(hostname)" != "magicboxie-device" ]; then \
+		echo "Setting hostname to magicboxie-device (reachable as magicboxie-device.local via Avahi)..."; \
+		sudo hostnamectl set-hostname magicboxie-device; \
+	fi
+	sudo systemctl enable --now avahi-daemon
 	sudo usermod -aG video,input,bluetooth "$$(whoami)"
 	python3 -m venv $(VENV)
 	$(VENV)/bin/pip install --upgrade pip
 	$(VENV)/bin/pip install -e .
 	sudo mkdir -p $(THUMBNAIL_DIR) $(TRANSCODE_DIR) $(CONTENT_DIR)
 	sudo chown "$$(whoami)" $(THUMBNAIL_DIR) $(TRANSCODE_DIR) $(CONTENT_DIR)
+	sudo install -d -m 700 -o "$$(whoami)" /var/lib/magicboxie
+	@if [ ! -e /var/lib/magicboxie/wifi-networks.json ]; then \
+		sudo install -m 600 -o "$$(whoami)" deploy/wifi-networks.json /var/lib/magicboxie/wifi-networks.json; \
+	fi
+	sudo chown "$$(whoami)" /var/lib/magicboxie/wifi-networks.json
+	sudo chmod 600 /var/lib/magicboxie/wifi-networks.json
 	@echo "pi-setup complete - log out/in (or reboot) so the new group membership takes effect."
 
 # Same sample-video seeding as `seed-movies`, but into the real device's
@@ -171,6 +183,27 @@ pi-service: pi-setup
 	sudo systemctl enable $(SERVICE_NAME)
 	@echo "Service installed and enabled - run 'make pi-start' to start it now."
 
+# Install the open AP profile without interrupting the current Wi-Fi session.
+# Startup tries saved networks before activating the AP as a fallback.
+pi-wifi-service:
+	sudo install -d -m 700 /etc/NetworkManager/system-connections
+	sudo install -m 600 deploy/magicboxie-hotspot.nmconnection /etc/NetworkManager/system-connections/magicboxie-hotspot.nmconnection
+	sudo install -m 644 deploy/magicboxie-hotspot-dnsmasq.conf /etc/magicboxie-hotspot-dnsmasq.conf
+	sudo dnsmasq --test --conf-file=/etc/magicboxie-hotspot-dnsmasq.conf
+	sudo install -m 644 deploy/magicboxie-hotspot.service /etc/systemd/system/magicboxie-hotspot.service
+	sudo systemctl enable --now NetworkManager
+	sudo nmcli connection reload
+	sudo install -d -m 755 /usr/local/lib/magicboxie
+	sudo install -m 644 player_app/wifi_startup.py player_app/wifi_networks.py player_app/storage.py /usr/local/lib/magicboxie/
+	sudo install -m 644 deploy/magicboxie-wifi-startup.service /etc/systemd/system/magicboxie-wifi-startup.service
+	sudo systemctl disable magicboxie-hotspot
+	sudo systemctl daemon-reload
+	sudo systemctl enable magicboxie-wifi-startup
+
+pi-wifi-start:
+	@echo 'Trying saved Wi-Fi; MagicBoxie Device hotspot starts if none connects within 30 seconds.'
+	sudo systemctl restart --no-block magicboxie-wifi-startup
+
 pi-start:
 	sudo systemctl start $(SERVICE_NAME)
 
@@ -181,9 +214,9 @@ pi-restart:
 	sudo systemctl restart $(SERVICE_NAME)
 
 # After pulling new code: reinstall into the venv and restart the service.
-pi-redeploy:
-	$(VENV)/bin/pip install -e .
+pi-redeploy: pi-service pi-wifi-service
 	sudo systemctl restart $(SERVICE_NAME)
+	$(MAKE) pi-wifi-start
 
 # Blocks until nothing's selected to play (PlaybackStatus.STOPPED, reported
 # as "stopped" by /api/status - see playback_controller.py's refresh_status
@@ -204,8 +237,8 @@ pi-wait-until-idle:
 	done
 
 # Pulls the latest code and redeploys, but only if the pull actually brought
-# in new commits - this is what magicboxie-self-update.timer runs once a
-# day (see pi-self-update-service below), so a day with nothing new to
+# in new commits - startup after saved Wi-Fi connects and the daily
+# magicboxie-self-update.timer both run this, so a check with nothing new to
 # install never interrupts whatever's playing with a pointless restart.
 # Waits for playback to be idle (pi-wait-until-idle above) before
 # redeploying, so even a real update never cuts off a movie already in
@@ -259,6 +292,11 @@ pi-logs:
 	journalctl -u $(SERVICE_NAME) -f
 
 pi-uninstall:
+	sudo systemctl disable --now magicboxie-wifi-startup 2>/dev/null || true
+	sudo rm -f /etc/systemd/system/magicboxie-wifi-startup.service /usr/local/lib/magicboxie/wifi_startup.py
+	sudo systemctl disable --now magicboxie-hotspot 2>/dev/null || true
+	sudo nmcli connection delete magicboxie-hotspot 2>/dev/null || true
+	sudo rm -f /etc/systemd/system/magicboxie-hotspot.service /etc/magicboxie-hotspot-dnsmasq.conf
 	sudo systemctl disable --now $(SERVICE_NAME) 2>/dev/null || true
 	sudo systemctl disable --now $(SELF_UPDATE_NAME).timer 2>/dev/null || true
 	sudo rm -f $(SERVICE_FILE) $(SELF_UPDATE_SERVICE_FILE) $(SELF_UPDATE_TIMER_FILE)

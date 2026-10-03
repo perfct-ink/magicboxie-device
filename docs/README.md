@@ -4,6 +4,9 @@ The MagicBoxie device daemon runs on a Raspberry Pi, plays video over HDMI,
 and exposes BLE and local HTTP control surfaces. Production installs run
 natively under systemd; Docker is only used for development.
 
+See [deployment.md](deployment.md) for deployment commands, device discovery,
+Wi-Fi configuration, self-update behavior, and verification.
+
 ## Install on a Raspberry Pi
 
 Start with Raspberry Pi OS (or another Debian-based Pi installation), connect
@@ -23,10 +26,92 @@ The script:
 - installs the required system and Python packages;
 - creates `/content` for movies and seeds it with sample videos when empty;
 - installs and enables the `magicboxie-device` systemd service; and
-- starts the service immediately.
+- starts the service immediately; and
+- tries saved Wi-Fi at startup and enables an open **MagicBoxie Device**
+  Wi-Fi hotspot and captive portal if none connects within 30 seconds.
 
 The install may take a while on a Pi Zero because it installs packages and
 generates the sample videos.
+
+### Connect to the device
+
+Join **MagicBoxie Device** in your phone or computer's Wi-Fi settings. There
+is no password. The captive portal opens the Pi's own webpage, where you can
+browse movies and control playback on its connected screen. Everything is
+served locally; the page requires no internet or external assets.
+
+If the login page does not open automatically, choose the network's
+“sign in” option or open **http://10.42.0.1/** in a browser. Portal popups
+are controlled by the client OS; VPNs, private DNS, and disabled network
+checks can prevent automatic opening. HTTPS sites cannot be redirected to
+this HTTP portal without certificate errors; use the HTTP address above.
+
+The hotspot uses `wlan0` in 2.4 GHz AP mode and gives clients addresses in
+`10.42.0.0/24`. It is an offline network, without internet forwarding.
+NetworkManager owns the open AP profile; a dedicated dnsmasq service provides
+DHCP and maps DNS names to the Pi, and the device serves the webpage on port
+80 alongside its existing API on port 8000. The network setup follows the
+[NetworkManager keyfile documentation](https://networkmanager.dev/docs/api/latest/nm-settings-keyfile.html)
+and [dnsmasq documentation](https://thekelleys.org.uk/dnsmasq/docs/dnsmasq-man.html).
+
+At every boot, NetworkManager first tries saved Wi-Fi profiles with automatic
+connection enabled, such as **Mitera** or **AV-iPhone17Pro**. If `wlan0` has
+not connected to a saved network within 30 seconds, the device starts its
+open hotspot. A successful Wi-Fi connection keeps the hotspot off, even if
+that network has no internet. Ethernet alone does not suppress the hotspot.
+The hotspot profile itself has automatic connection disabled so it cannot
+preempt the saved-network startup window. Profile activation uses
+[NetworkManager's saved connections](https://networkmanager.pages.freedesktop.org/NetworkManager/NetworkManager/nmcli.html).
+
+Saved SSIDs and passwords live in **`/var/lib/magicboxie/wifi-networks.json`**,
+outside the Git checkout. The installer copies the tracked **`deploy/wifi-networks.json`** only if the
+device file does not already exist, preserves it across updates, and sets permissions to `600`
+(owner and root only). Successful BLE provisioning updates this file atomically.
+Startup restores these entries into NetworkManager before trying saved Wi-Fi.
+Existing NetworkManager-only profiles also continue to work.
+
+Edit the file on the Pi with `sudoedit /var/lib/magicboxie/wifi-networks.json`:
+
+```json
+{
+  "version": 1,
+  "networks": [
+    {"ssid": "Mitera", "password": "YOUR_MITERA_PASSWORD"},
+    {"ssid": "AV-iPhone17Pro", "password": "YOUR_IPHONE_HOTSPOT_PASSWORD"}
+  ]
+}
+```
+
+Replace the example passwords with the real ones. An empty password represents
+an open network; protected entries use WPA personal passwords. The static
+`deploy/wifi-networks.json` may contain credentials and be committed, as
+authorized. It currently contains an empty list because no credentials have
+been supplied. Editing the tracked file seeds new installations; to update an
+existing device, edit its runtime file as shown above. Manually creating profiles with `nmcli` does not update the JSON
+file; use the file or BLE when you want both stores to stay synchronized.
+Removing an entry from the JSON does not delete its existing NetworkManager
+profile; also delete that profile if you want to forget the network.
+
+Once startup connects to saved Wi-Fi, it immediately requests the existing
+self-update service. The update runs in the background, pulls the latest code,
+and waits for playback to be idle before installing changes. A failed update
+or a network without internet leaves the Wi-Fi connection intact. The daily
+update timer remains enabled for later retries. Hotspot fallback does not
+request an update.
+
+The startup check also runs at the end of installation and deployment. An
+existing Wi-Fi connection or active hotspot stays connected. If fallback
+activates, connect to **MagicBoxie Device**, then SSH to `10.42.0.1` with your
+existing Pi account. Use Ethernet or a second Wi-Fi adapter for internet
+access while broadcasting. BLE provisioning can switch the built-in adapter
+to a supplied network. The startup decision is made once, without repeatedly
+switching networks while someone is using the device; reboot or run
+`make pi-wifi-start` to try the startup policy again.
+
+Anyone in Wi-Fi range can join and use the device's unauthenticated controls
+and API, including uploads and deletions. Use this mode where that access is
+intended. The installer targets Raspberry Pi OS with NetworkManager and an
+AP-capable `wlan0`; it does not migrate legacy dhcpcd/hostapd installations.
 
 ### Verify the installation
 
@@ -91,6 +176,12 @@ It detects the existing checkout, updates it, and reapplies the installation.
 
 - Confirm the daemon is running with `systemctl status magicboxie-device`.
 - Inspect recent logs with `journalctl -u magicboxie-device -n 100`.
+- Check startup selection with `systemctl status magicboxie-wifi-startup`
+  and `journalctl -u magicboxie-wifi-startup -b`.
+- Check the hotspot with `systemctl status magicboxie-hotspot` and
+  `journalctl -u magicboxie-hotspot -n 100`.
+- Confirm the open AP with `nmcli connection show magicboxie-hotspot`.
+- Confirm the portal with `curl http://10.42.0.1/`.
 - Confirm Bluetooth is available with `bluetoothctl show`.
 - Confirm the API locally with `curl http://localhost:8000/api/version`.
 - Reboot after the initial installation if you plan to run the daemon manually;

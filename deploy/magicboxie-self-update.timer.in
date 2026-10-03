@@ -6,11 +6,10 @@
 # Fires magicboxie-self-update.service once a day. Persistent=true means a
 # run the device missed entirely - powered off, or offline, at the
 # scheduled time - fires as soon as the timer next gets a chance to run
-# instead of being skipped until the following day; that, plus the
-# service's own git-pull-just-fails-quietly-when-offline handling, is what
-# "whenever it gets internet" actually reduces to here - there's no separate
-# connectivity check. RandomizedDelaySec spreads the actual pull out over an
-# hour rather than every device hitting the git remote at the same instant.
+# instead of being skipped until the following day. The service tolerates
+# offline git-pull failures; the daily timer supplies later retries. Startup
+# also requests an update after joining saved Wi-Fi. RandomizedDelaySec
+# spreads daily pulls over an hour to stagger requests to the Git remote.
 [Unit]
 Description=Run MagicBoxie's daily self-update
 
