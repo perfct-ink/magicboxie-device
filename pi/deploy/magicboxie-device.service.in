@@ -1,5 +1,5 @@
 # Template for /etc/systemd/system/magicboxie-device.service - installed and
-# filled in by `make pi-service` (placeholders substituted with sed).
+# filled in by `make service` (placeholders substituted with sed).
 # Runs the daemon natively on the Pi: BLE + HDMI/DRM output, no Docker.
 [Unit]
 Description=MagicBoxie device daemon
@@ -28,7 +28,7 @@ ExecStart=@REPO_DIR@/.venv/bin/magicboxie-device
 Restart=on-failure
 RestartSec=2
 
-# DRM/KMS output + evdev keyboard input + BlueZ D-Bus - see `make pi-setup`,
+# DRM/KMS output + evdev keyboard input + BlueZ D-Bus - see `make setup`,
 # which adds @USER@ to these groups. CAP_NET_ADMIN lets the ExecStartPre
 # rfkill unblock above work without running the whole service as root.
 SupplementaryGroups=video input bluetooth

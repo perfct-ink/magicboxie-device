@@ -1,5 +1,5 @@
 # Template for /etc/systemd/system/magicboxie-self-update.timer - rendered
-# and enabled by `make pi-self-update-service`. No placeholders to fill in
+# and enabled by `make self-update-service`. No placeholders to fill in
 # (unlike the .service.in next to this), so that target just copies it
 # as-is rather than piping it through sed.
 #

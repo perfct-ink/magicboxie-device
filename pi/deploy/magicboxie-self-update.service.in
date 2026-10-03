@@ -1,10 +1,10 @@
 # Template for /etc/systemd/system/magicboxie-self-update.service - rendered
-# and enabled (via its companion .timer) by `make pi-self-update-service`.
+# and enabled (via its companion .timer) by `make self-update-service`.
 # Oneshot: runs after startup connects to saved Wi-Fi and once a day
 # (see the .timer). Pulls the latest code and, only if
 # that pull actually brought in new commits, waits for nothing to be
 # playing and then restarts magicboxie-device.service - see the
-# `pi-self-update`/`pi-wait-until-idle` Makefile targets for the actual
+# `self-update`/`wait-until-idle` Makefile targets for the actual
 # logic, kept there (rather than inlined here) alongside every other pi-*
 # target. No timeout on that wait, so this can legitimately run for a long
 # time on a day an update lands mid-movie - that's fine for a oneshot.
@@ -17,4 +17,4 @@ Wants=network-online.target
 Type=oneshot
 User=@USER@
 WorkingDirectory=@REPO_DIR@
-ExecStart=/usr/bin/make -C @REPO_DIR@ pi-self-update
+ExecStart=/usr/bin/make -C @REPO_DIR@ self-update

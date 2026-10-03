@@ -126,7 +126,7 @@ async def reboot() -> Optional[str]:
     """Reboots the device; returns an error message if it could not start.
 
     `sudo -n` never prompts. The installer's sudoers rule (see `make
-    pi-setup`) allows exactly this command for the service user.
+    setup`) allows exactly this command for the service user.
     """
     try:
         process = await asyncio.create_subprocess_exec(

@@ -57,5 +57,9 @@ clean:
 # Everything deployed to the device lives in pi/ (see pi/Makefile). These
 # forward `make pi`, `make pi-install`, `make pi-logs`, ... from the repo root,
 # which is where install.sh and existing checkouts run them.
-pi pi-%:
-	@$(MAKE) -C pi $@
+# `make pi` runs pi/Makefile's `deploy`; `make pi-<target>` runs `<target>`.
+pi:
+	@$(MAKE) -C pi deploy
+
+pi-%:
+	@$(MAKE) -C pi $*

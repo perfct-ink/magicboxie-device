@@ -32,7 +32,7 @@ _CELL_HEIGHT = _THUMBNAIL_MAX_SIZE[1] + _CAPTION_HEIGHT + _CELL_PADDING * 2
 _BACKGROUND = (0, 0, 0)
 _TEXT_COLOR = (220, 220, 220)
 _CAPTION_FONT_SIZE = 18
-# fonts-dejavu-core (installed by both the Dockerfile and `make pi-setup`) is
+# fonts-dejavu-core (installed by both the Dockerfile and `make setup`) is
 # the only TrueType font guaranteed to be on the box. Without it, PIL falls
 # back to its own tiny unscaled bitmap font, which is illegible on an HDMI
 # display - hence the fallback below only kicks in for dev machines that
