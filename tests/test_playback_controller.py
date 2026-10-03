@@ -301,7 +301,7 @@ def test_restore_last_playback_ignores_corrupt_state_file(tmp_path):
     assert not state_path.exists()
 
 
-def test_startup_plays_random_movie_instead_of_saved_state(tmp_path):
+def test_startup_continues_the_saved_movie_at_its_position(tmp_path):
     state_path = tmp_path / "state.json"
     state_path.write_text(json.dumps({"movie_id": 0, "position_seconds": 50, "paused": True}))
 
@@ -310,8 +310,22 @@ def test_startup_plays_random_movie_instead_of_saved_state(tmp_path):
         controller = PlaybackController(FakeLibrary(), player, state_path)
         with patch("player_app.controllers.playback_controller.random.choice", side_effect=lambda movies: movies[-1]):
             await controller.start_random_playback()
+        assert player.loaded_path == FakeLibrary().path_for(0)
+        assert player.position == 50
+        assert player.paused
+
+    asyncio.run(scenario())
+
+
+def test_startup_plays_a_random_movie_when_nothing_was_playing(tmp_path):
+    state_path = tmp_path / "state.json"
+
+    async def scenario():
+        player = FakeMpv()
+        controller = PlaybackController(FakeLibrary(), player, state_path)
+        with patch("player_app.controllers.playback_controller.random.choice", side_effect=lambda movies: movies[-1]):
+            await controller.start_random_playback()
         assert player.loaded_path == FakeLibrary().path_for(1)
-        assert player.position == 0
         assert not player.paused
 
     asyncio.run(scenario())

@@ -683,3 +683,18 @@ def test_welcome_page_only_points_to_the_browser():
         finally:
             await client.close()
     asyncio.run(scenario())
+
+
+def test_shutdown_reports_success_and_failure():
+    async def scenario(error):
+        client, _ = await _make_client()
+        try:
+            with patch("web.web_service.system_info.shutdown", new=AsyncMock(return_value=error)):
+                response = await client.post("/api/shutdown")
+                return response.status, await response.json()
+        finally:
+            await client.close()
+
+    assert asyncio.run(scenario(None)) == (200, {"ok": True})
+    status, body = asyncio.run(scenario("not permitted"))
+    assert status == 500 and body["error"] == "not permitted"

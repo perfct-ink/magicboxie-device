@@ -27,7 +27,7 @@ BOOT_UPDATE_SERVICE_FILE := /etc/systemd/system/$(BOOT_UPDATE_NAME).service
 
 .PHONY: deploy pull install setup seed-movies run test service start stop \
 	restart redeploy wait-until-idle self-update self-update-service logs \
-	uninstall clean wifi-service wifi-start sparse-refresh boot-update
+	uninstall clean wifi-service wifi-start sparse-refresh boot-update repair-checkout
 
 # --- Raspberry Pi (native, no Docker) -------------------------------------
 # The real device: installs system packages + a venv directly on the Pi and
@@ -86,9 +86,8 @@ setup: sparse-refresh
 		sudo hostnamectl set-hostname magicboxie-player; \
 	fi
 	sudo systemctl enable --now avahi-daemon
-	@# Persistent journal (size-capped) so a reboot or crash leaves logs to read with `journalctl -b -1`.
-	sudo mkdir -p /var/log/journal /etc/systemd/journald.conf.d
-	printf '[Journal]\nStorage=persistent\nSystemMaxUse=50M\n' | sudo tee /etc/systemd/journald.conf.d/magicboxie.conf >/dev/null
+	@# Logs stay in RAM: a device that is unplugged often should not write the journal to the SD card.
+	sudo rm -rf /etc/systemd/journald.conf.d/magicboxie.conf /var/log/journal
 	sudo systemctl restart systemd-journald
 	printf '%s ALL=(root) NOPASSWD: /usr/bin/systemctl reboot, /usr/bin/systemctl poweroff\n' "$$(whoami)" | sudo tee /etc/sudoers.d/magicboxie >/dev/null
 	sudo chmod 440 /etc/sudoers.d/magicboxie
@@ -203,6 +202,28 @@ wait-until-idle:
 		status="$$(curl -s --max-time 5 http://localhost:$(HTTP_PORT)/api/status | python3 -c 'import json,sys; print(json.load(sys.stdin).get("status", ""))' 2>/dev/null)"; \
 	done
 
+# Power loss mid-pull or mid-checkout can leave a stale index.lock, empty git
+# objects, or half-written tracked files. A device checkout (sparse, from
+# install.sh) is deployment-only - changes arrive through git - so restore its
+# tracked files to HEAD. Runs before the daemon starts (ExecStartPre) and
+# before every self-update, so a damaged checkout never keeps the device from
+# booting or updating. Never touches untracked files (the venv, caches), and
+# does nothing in a normal development checkout (no sparse-checkout).
+repair-checkout:
+	@[ "$$(git config --get core.sparseCheckout)" = "true" ] || exit 0; \
+	gitdir="$$(git rev-parse --git-dir 2>/dev/null)" || exit 0; \
+	pgrep -x git >/dev/null && exit 0; \
+	rm -f "$$gitdir/index.lock"; \
+	if ! git rev-parse --verify -q 'HEAD^{commit}' >/dev/null || ! git status --porcelain --untracked-files=no >/dev/null 2>&1; then \
+		echo "repair-checkout: git data looks damaged - removing empty objects"; \
+		find "$$gitdir/objects" -type f -size 0 -delete; \
+	fi; \
+	if [ -n "$$(git status --porcelain --untracked-files=no 2>/dev/null)" ]; then \
+		echo "repair-checkout: restoring tracked files to HEAD:"; \
+		git status --short --untracked-files=no; \
+		git reset --hard HEAD || true; \
+	fi
+
 # Pulls the latest code and redeploys, but only if the pull actually brought
 # in new commits - startup after saved Wi-Fi connects and the daily
 # magicboxie-self-update.timer both run this, so a check with nothing new to
@@ -216,9 +237,10 @@ wait-until-idle:
 # real device, but could during development on one) rather than risking
 # git's merge machinery touching them.
 self-update:
-	@if [ -n "$$(git status --porcelain)" ]; then \
-		echo "self-update: local changes present in $(CURDIR) - skipping"; \
-		exit 0; \
+	@$(MAKE) -s repair-checkout; \
+	if ! git rev-parse --verify -q 'HEAD^{commit}' >/dev/null; then \
+		echo "self-update: HEAD is unreadable - fetching a fresh copy"; \
+		git fetch origin HEAD && git reset --hard FETCH_HEAD || { echo "self-update: repair failed - will retry later"; exit 0; }; \
 	fi; \
 	before="$$(git rev-parse HEAD)"; \
 	python3 -m player_app.update_status checking $$$$; \

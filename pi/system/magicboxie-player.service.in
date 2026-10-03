@@ -24,6 +24,8 @@ Environment=MAGICBOXIE_HOME_SERVER_PASSWORD=@HOME_SERVER_PASSWORD@
 # power cycle. "-" prefix: don't fail the whole unit if rfkill is missing
 # or there's nothing to unblock.
 ExecStartPre=-/usr/sbin/rfkill unblock bluetooth
+# Power loss during an update can leave the checkout half-written - restore it before starting.
+ExecStartPre=-/usr/bin/make -C @REPO_DIR@ repair-checkout
 ExecStart=@REPO_DIR@/.venv/bin/magicboxie-player
 Restart=on-failure
 RestartSec=2

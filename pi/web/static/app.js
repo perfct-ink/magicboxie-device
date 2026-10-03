@@ -162,9 +162,17 @@ function openSettings() {
       note.textContent = 'Rebooting… this page reconnects when the device is back.';
     } catch (error) {note.textContent = error.message;}
   });
+  const shutdown = document.createElement('button'); shutdown.className = 'btn danger'; shutdown.textContent = 'Shut down';
+  shutdown.addEventListener('click', async () => {
+    if (!confirm('Shut down the device? It stays off until it is unplugged and plugged back in.')) return;
+    try {
+      await api('/api/shutdown', {method:'POST'});
+      note.textContent = 'Shutting down… wait for the activity light to stop before unplugging.';
+    } catch (error) {note.textContent = error.message;}
+  });
   const close = document.createElement('button'); close.className = 'btn grey'; close.textContent = 'Close';
   close.addEventListener('click', closeSheet);
-  row.append(reboot, close); body.append(h, details, note, row); panel.append(body);
+  row.append(reboot, shutdown, close); body.append(h, details, note, row); panel.append(body);
   $('sheet').classList.remove('hidden');
   refreshSettings(); clearInterval(settingsTimer); settingsTimer = setInterval(refreshSettings, 5000);
 }

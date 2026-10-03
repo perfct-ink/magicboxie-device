@@ -60,3 +60,4 @@ body.welcome main{max-width:480px;text-align:center;padding-top:48px}
 .address{margin:16px 0 24px;padding:16px;border-radius:6px;background:#1f1f1f;border:1px solid #333;font:600 22px ui-monospace,monospace;user-select:all;word-break:break-all}
 .welcome .buttons{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
 .welcome a.btn{text-decoration:none;display:inline-block}
+#sheet .row{flex-wrap:wrap}

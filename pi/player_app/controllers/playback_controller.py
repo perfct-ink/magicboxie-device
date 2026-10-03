@@ -219,9 +219,14 @@ class PlaybackController:
         await self._show_idle_screen_locked()
 
     async def start_random_playback(self) -> None:
-        """Start once the library is ready, unless startup input took priority."""
+        """Start once the library is ready, unless startup input took priority.
+        Continues whatever was playing before the device last stopped (power
+        loss, reboot, update restart) at its saved position; only picks a
+        random movie when nothing was playing then."""
         async with self._lock:
             if self.last_input_at != self._startup_input_at or not self.is_idle:
+                return
+            if await self.restore_last_playback():
                 return
             await run_io(self._clear_playback_state)
             if not await self._play_random_movie():

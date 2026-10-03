@@ -56,6 +56,7 @@ def create_app(controller: PlaybackController) -> web.Application:
     app.router.add_get("/api/version", _get_version)
     app.router.add_get("/api/info", _get_info)
     app.router.add_post("/api/reboot", _post_reboot)
+    app.router.add_post("/api/shutdown", _post_shutdown)
     # Android, Apple, and Windows probe different HTTP paths. An unexpected
     # HTML redirect (rather than their expected success response) opens login.
     app.router.add_get("/{path:.*}", _redirect_to_portal)
@@ -327,6 +328,13 @@ async def _get_info(request: web.Request) -> web.Response:
 
 async def _post_reboot(request: web.Request) -> web.Response:
     error = await system_info.reboot()
+    if error:
+        return web.json_response({"error": error}, status=500)
+    return web.json_response({"ok": True})
+
+
+async def _post_shutdown(request: web.Request) -> web.Response:
+    error = await system_info.shutdown()
     if error:
         return web.json_response({"error": error}, status=500)
     return web.json_response({"ok": True})

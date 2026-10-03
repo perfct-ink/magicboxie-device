@@ -122,21 +122,30 @@ def snapshot(movies_root) -> dict:
     }
 
 
-async def reboot() -> Optional[str]:
-    """Reboots the device; returns an error message if it could not start.
+async def _systemctl_power(action: str) -> Optional[str]:
+    """Runs `systemctl <action>` (reboot or poweroff); returns an error
+    message if it could not start.
 
-    `sudo -n` never prompts. The installer's sudoers rule (see `make
-    setup`) allows exactly this command for the service user.
+    `sudo -n` never prompts. The installer's sudoers rule (see `make setup`)
+    allows exactly these commands for the service user.
     """
     try:
         process = await asyncio.create_subprocess_exec(
-            "sudo", "-n", "/usr/bin/systemctl", "reboot",
+            "sudo", "-n", "/usr/bin/systemctl", action,
             stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
         )
     except OSError as exc:
-        return f"could not run reboot: {exc}"
+        return f"could not run {action}: {exc}"
     try:
         code = await asyncio.wait_for(process.wait(), timeout=2)
     except asyncio.TimeoutError:
         return None  # still running: the system is going down
-    return None if code == 0 else "the device is not permitted to reboot itself"
+    return None if code == 0 else f"the device is not permitted to {action} itself"
+
+
+async def reboot() -> Optional[str]:
+    return await _systemctl_power("reboot")
+
+
+async def shutdown() -> Optional[str]:
+    return await _systemctl_power("poweroff")
