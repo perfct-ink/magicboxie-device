@@ -1,7 +1,7 @@
 [project]
-name = "magicboxie-device"
+name = "magicboxie-player"
 version = "0.1.0"
-description = "MagicBoxie device daemon: BLE GATT control surface driving mpv for HDMI playback"
+description = "MagicBoxie player daemon: BLE GATT control surface driving mpv for HDMI playback"
 requires-python = ">=3.9"
 dependencies = [
     "bluez-peripheral>=0.1.7",
@@ -24,7 +24,7 @@ dev = [
 ]
 
 [project.scripts]
-magicboxie-device = "player_app.main:run"
+magicboxie-player = "player_app.main:run"
 
 [build-system]
 requires = ["setuptools>=61.0"]

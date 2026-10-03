@@ -536,7 +536,7 @@ def test_portal_is_an_offline_html_page():
             assert response.status == 200
             assert response.content_type == "text/html"
             html = await response.text()
-            assert "MagicBoxie Device" in html
+            assert "MagicBoxie Player" in html
             assert "https://" not in html
             assert response.headers["Cache-Control"] == "no-store"
             script = await client.get("/static/app.js")

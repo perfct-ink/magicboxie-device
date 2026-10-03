@@ -1,5 +1,5 @@
 #!/bin/sh
-# Bootstraps a MagicBoxie device on a fresh Raspberry Pi. Since the Pi has no
+# Bootstraps a MagicBoxie player on a fresh Raspberry Pi. Since the Pi has no
 # other easy way to get files onto it and isn't online most of the time,
 # this is meant to be curled and run once, while it does have internet
 # (e.g. over SSH on the home WiFi during initial setup):
@@ -14,7 +14,7 @@ set -eu
 
 REPO_URL="https://github.com/kriogenx0/magicboxie-device.git"
 REPO_REF="${MAGICBOXIE_REF:-main}"
-INSTALL_DIR="${MAGICBOXIE_INSTALL_DIR:-$HOME/magicboxie-device}"
+INSTALL_DIR="${MAGICBOXIE_INSTALL_DIR:-$HOME/magicboxie-player}"
 
 configure_sparse_checkout() {
     git -C "$INSTALL_DIR" sparse-checkout init --no-cone

@@ -24,7 +24,7 @@ RUN pip install --no-cache-dir .
 ENV MAGICBOXIE_MOVIES_DIR=/movies
 EXPOSE 8000
 
-ENTRYPOINT ["magicboxie-device"]
+ENTRYPOINT ["magicboxie-player"]
 
 # `make test` / `docker build --target test`: runs the suite inside the same
 # environment the app ships in, so `make` never depends on a local Python.

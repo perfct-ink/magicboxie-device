@@ -1,5 +1,5 @@
 services:
-  magicboxie-device:
+  magicboxie-player:
     build:
       context: .
       target: base  # the Dockerfile's `test` stage is defined after `base`, so this must be explicit

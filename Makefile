@@ -1,4 +1,4 @@
-IMAGE := magicboxie-device
+IMAGE := magicboxie-player
 MOVIES_DIR := movies
 .PHONY: all setup dev build test clean seed-movies pi
 

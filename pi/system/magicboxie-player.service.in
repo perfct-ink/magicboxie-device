@@ -1,8 +1,8 @@
-# Template for /etc/systemd/system/magicboxie-device.service - installed and
+# Template for /etc/systemd/system/magicboxie-player.service - installed and
 # filled in by `make service` (placeholders substituted with sed).
 # Runs the daemon natively on the Pi: BLE + HDMI/DRM output, no Docker.
 [Unit]
-Description=MagicBoxie device daemon
+Description=MagicBoxie player daemon
 After=bluetooth.target network.target dbus.service
 Wants=bluetooth.target
 
@@ -24,7 +24,7 @@ Environment=MAGICBOXIE_HOME_SERVER_PASSWORD=@HOME_SERVER_PASSWORD@
 # power cycle. "-" prefix: don't fail the whole unit if rfkill is missing
 # or there's nothing to unblock.
 ExecStartPre=-/usr/sbin/rfkill unblock bluetooth
-ExecStart=@REPO_DIR@/.venv/bin/magicboxie-device
+ExecStart=@REPO_DIR@/.venv/bin/magicboxie-player
 Restart=on-failure
 RestartSec=2
 

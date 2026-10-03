@@ -3,7 +3,7 @@
 # Oneshot: runs after startup connects to saved Wi-Fi and once a day
 # (see the .timer). Pulls the latest code and, only if
 # that pull actually brought in new commits, waits for nothing to be
-# playing and then restarts magicboxie-device.service - see the
+# playing and then restarts magicboxie-player.service - see the
 # `self-update`/`wait-until-idle` Makefile targets for the actual
 # logic, kept there (rather than inlined here) alongside every other pi-*
 # target. No timeout on that wait, so this can legitimately run for a long

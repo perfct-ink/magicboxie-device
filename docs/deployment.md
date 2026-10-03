@@ -1,4 +1,4 @@
-# Deploying MagicBoxie Device
+# Deploying MagicBoxie Player
 
 Production runs directly on Raspberry Pi OS using systemd and a Python virtual
 environment. Docker is for local development. Run the `pi-*` Make targets on
@@ -21,7 +21,7 @@ On October 3, 2026, the device was verified over password-authenticated SSH:
 | Hostname | `magicboxie-player` (`magicboxie-player.local`) |
 | Checkout | `/home/admin/magicboxie-device` |
 | Connection | Ethernet (`eth0`) |
-| Daemon | `magicboxie-device.service`, active |
+| Daemon | `magicboxie-player.service`, active |
 | Open ports checked | SSH 22 and device HTTP API 8000 |
 
 Connect using `ssh admin@192.168.86.57` and the supplied device password.
@@ -37,7 +37,7 @@ server also advertised that name with an unusable `127.0.0.1` address; neither
 the name nor a matching API response alone identifies the target device.
 Verify the responding host and hardware over SSH before deploying.
 
-The home server had a running `magicboxie-device.service` on port 8000 and
+The home server had a running `magicboxie-player.service` on port 8000 and
 nginx on port 80. Its Wi-Fi startup and self-update units were absent. Those
 observations describe the home server, not the other Pi. The target's current service state is listed above.
 
@@ -76,7 +76,7 @@ On the Pi, run:
 curl -fsSL https://raw.githubusercontent.com/kriogenx0/magicboxie-device/main/install.sh | sh
 ```
 
-The bootstrap script defaults to branch `main` and `~/magicboxie-device`.
+The bootstrap script defaults to branch `main` and `~/magicboxie-player`.
 `MAGICBOXIE_REF` and `MAGICBOXIE_INSTALL_DIR` can override these defaults.
 It installs Git if needed and creates a shallow sparse checkout containing
 `pi/` (everything deployed to the device) and the root `Makefile`, which
@@ -92,14 +92,14 @@ If the daemon was already running, follow installation with `make pi-restart`:
 `pi-install` uses `systemctl start`, which does not restart an active daemon.
 
 ```sh
-cd ~/magicboxie-device
+cd ~/magicboxie-player
 make pi-restart
 ```
 
 For an already complete checkout of the intended revision, use:
 
 ```sh
-cd ~/magicboxie-device
+cd ~/magicboxie-player
 make pi-install
 ```
 
@@ -123,7 +123,7 @@ After pushing the intended changes, connect to the Pi and run:
 
 ```sh
 ssh DEVICE_USER@DEVICE_IP
-cd ~/magicboxie-device
+cd ~/magicboxie-player
 make pi
 ```
 
@@ -181,7 +181,7 @@ Existing saved NetworkManager profiles with autoconnect enabled also work.
 
 - Saved Wi-Fi connects: keep that connection and queue a self-update attempt.
   Wi-Fi does not need internet access to count as connected.
-- No Wi-Fi connects within 30 seconds: activate **MagicBoxie Device**, with
+- No Wi-Fi connects within 30 seconds: activate **MagicBoxie Player**, with
   no password, at `10.42.0.1`. Ethernet alone does not suppress this fallback.
 - Hotspot already active during deployment: preserve it and its clients.
 
@@ -225,7 +225,7 @@ unit rather than launching parallel updater processes.
 On the Pi:
 
 ```sh
-systemctl status magicboxie-device magicboxie-wifi-startup
+systemctl status magicboxie-player magicboxie-wifi-startup
 systemctl list-timers magicboxie-self-update.timer
 nmcli -f NAME,TYPE,DEVICE connection show --active
 curl -fsS http://localhost:8000/api/version

@@ -6,7 +6,7 @@ autoconnect=false
 
 [wifi]
 mode=ap
-ssid=MagicBoxie Device
+ssid=MagicBoxie Player
 band=bg
 hidden=false
 

@@ -107,7 +107,7 @@ def main() -> None:
     if wait_for_saved_wifi():
         request_self_update()
     else:
-        logger.info("Starting MagicBoxie Device hotspot")
+        logger.info("Starting MagicBoxie Player hotspot")
         subprocess.run(["systemctl", "start", "magicboxie-hotspot.service"], check=True)
 
 

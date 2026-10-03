@@ -1,6 +1,6 @@
-# MagicBoxie Device
+# MagicBoxie Player
 
-The MagicBoxie device daemon runs on a Raspberry Pi, plays video over HDMI,
+The MagicBoxie player daemon runs on a Raspberry Pi, plays video over HDMI,
 and exposes BLE and local HTTP control surfaces. Production installs run
 natively under systemd; Docker is only used for development.
 
@@ -22,12 +22,12 @@ curl -fsSL https://raw.githubusercontent.com/kriogenx0/magicboxie-device/main/in
 The script:
 
 - installs Git if necessary;
-- creates a minimal checkout in `~/magicboxie-device`;
+- creates a minimal checkout in `~/magicboxie-player`;
 - installs the required system and Python packages;
 - creates `/content` for movies and seeds it with sample videos when empty;
-- installs and enables the `magicboxie-device` systemd service; and
+- installs and enables the `magicboxie-player` systemd service; and
 - starts the service immediately; and
-- tries saved Wi-Fi at startup and enables an open **MagicBoxie Device**
+- tries saved Wi-Fi at startup and enables an open **MagicBoxie Player**
   Wi-Fi hotspot and captive portal if none connects within 30 seconds.
 
 The install may take a while on a Pi Zero because it installs packages and
@@ -35,7 +35,7 @@ generates the sample videos.
 
 ### Connect to the device
 
-Join **MagicBoxie Device** in your phone or computer's Wi-Fi settings. There
+Join **MagicBoxie Player** in your phone or computer's Wi-Fi settings. There
 is no password. The captive portal opens the Pi's own webpage, where you can
 browse movies and control playback on its connected screen. Everything is
 served locally; the page requires no internet or external assets.
@@ -101,7 +101,7 @@ request an update.
 
 The startup check also runs at the end of installation and deployment. An
 existing Wi-Fi connection or active hotspot stays connected. If fallback
-activates, connect to **MagicBoxie Device**, then SSH to `10.42.0.1` with your
+activates, connect to **MagicBoxie Player**, then SSH to `10.42.0.1` with your
 existing Pi account. Use Ethernet or a second Wi-Fi adapter for internet
 access while broadcasting. BLE provisioning can switch the built-in adapter
 to a supplied network. The startup decision is made once, without repeatedly
@@ -118,13 +118,13 @@ AP-capable `wlan0`; it does not migrate legacy dhcpcd/hostapd installations.
 Check the service:
 
 ```sh
-systemctl status magicboxie-device
+systemctl status magicboxie-player
 ```
 
 Follow its logs:
 
 ```sh
-cd ~/magicboxie-device
+cd ~/magicboxie-player
 make pi-logs
 ```
 
@@ -154,13 +154,13 @@ From the checkout on the Pi, pull the latest code, refresh dependencies and
 the service definition, and restart:
 
 ```sh
-cd ~/magicboxie-device
+cd ~/magicboxie-player
 make pi
 ```
 
 ## Service commands
 
-Run these from `~/magicboxie-device`:
+Run these from `~/magicboxie-player`:
 
 ```sh
 make pi-start
@@ -174,8 +174,8 @@ It detects the existing checkout, updates it, and reapplies the installation.
 
 ## Troubleshooting
 
-- Confirm the daemon is running with `systemctl status magicboxie-device`.
-- Inspect recent logs with `journalctl -u magicboxie-device -n 100`.
+- Confirm the daemon is running with `systemctl status magicboxie-player`.
+- Inspect recent logs with `journalctl -u magicboxie-player -n 100`.
 - Check startup selection with `systemctl status magicboxie-wifi-startup`
   and `journalctl -u magicboxie-wifi-startup -b`.
 - Check the hotspot with `systemctl status magicboxie-hotspot` and

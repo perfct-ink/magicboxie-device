@@ -17,7 +17,7 @@ CONTENT_DIR := /content
 # to poll the device's own /api/status from wait-until-idle below, so
 # override this too if you've overridden that.
 HTTP_PORT := 8000
-SERVICE_NAME := magicboxie-device
+SERVICE_NAME := magicboxie-player
 SERVICE_FILE := /etc/systemd/system/$(SERVICE_NAME).service
 SELF_UPDATE_NAME := magicboxie-self-update
 SELF_UPDATE_SERVICE_FILE := /etc/systemd/system/$(SELF_UPDATE_NAME).service
@@ -73,7 +73,7 @@ pull: sparse-refresh
 # DRM output, keyboard Escape-to-stop, and BLE - re-login (or reboot) is
 # required for that group change to apply.
 setup: sparse-refresh
-	@command -v apt-get >/dev/null || { echo "apt-get not found - * targets are for Raspberry Pi OS/Debian"; exit 1; }
+	@command -v apt-get >/dev/null || { echo "apt-get not found - these targets are for Raspberry Pi OS/Debian"; exit 1; }
 	sudo apt-get update
 	sudo apt-get install -y --no-install-recommends \
 		python3-venv python3-dev build-essential \
@@ -119,17 +119,20 @@ seed-movies:
 # Foreground run in the current terminal - useful for a quick check or
 # debugging without installing the systemd service. Ctrl-C to stop.
 run: seed-movies
-	MAGICBOXIE_MOVIES_DIR=$(CONTENT_DIR) MAGICBOXIE_THUMBNAIL_DIR=$(THUMBNAIL_DIR) MAGICBOXIE_TRANSCODE_DIR=$(TRANSCODE_DIR) $(VENV)/bin/magicboxie-device
+	MAGICBOXIE_MOVIES_DIR=$(CONTENT_DIR) MAGICBOXIE_THUMBNAIL_DIR=$(THUMBNAIL_DIR) MAGICBOXIE_TRANSCODE_DIR=$(TRANSCODE_DIR) $(VENV)/bin/magicboxie-player
 
 # Runs the test suite in the same venv the app runs in on the Pi.
 test:
 	$(VENV)/bin/pip install -e ".[dev]"
 	$(VENV)/bin/python -m pytest -v ../tests
 
-# Renders system/magicboxie-device.service.in (user/paths filled in) to
+# Renders system/magicboxie-player.service.in (user/paths filled in) to
 # /etc/systemd/system and enables it to start on boot. Doesn't start it -
 # run `make start` (or reboot) after.
 service: setup
+	@# Renamed from magicboxie-device: retire the old unit so two daemons never contend for the ports.
+	-sudo systemctl disable --now magicboxie-device 2>/dev/null
+	sudo rm -f /etc/systemd/system/magicboxie-device.service
 	sed \
 		-e 's|@USER@|'"$$(whoami)"'|g' \
 		-e 's|@REPO_DIR@|$(CURDIR)|g' \
@@ -138,7 +141,7 @@ service: setup
 		-e 's|@TRANSCODE_DIR@|$(TRANSCODE_DIR)|g' \
 		-e 's|@HOME_SERVER_URL@|$(HOME_SERVER_URL)|g' \
 		-e 's|@HOME_SERVER_PASSWORD@|$(HOME_SERVER_PASSWORD)|g' \
-		system/magicboxie-device.service.in | sudo tee $(SERVICE_FILE) >/dev/null
+		system/magicboxie-player.service.in | sudo tee $(SERVICE_FILE) >/dev/null
 	sudo systemctl daemon-reload
 	sudo systemctl enable $(SERVICE_NAME)
 	@echo "Service installed and enabled - run 'make start' to start it now."
@@ -161,7 +164,7 @@ wifi-service:
 	sudo systemctl enable magicboxie-wifi-startup
 
 wifi-start:
-	@echo 'Trying saved Wi-Fi; MagicBoxie Device hotspot starts if none connects within 30 seconds.'
+	@echo 'Trying saved Wi-Fi; MagicBoxie Player hotspot starts if none connects within 30 seconds.'
 	sudo systemctl restart --no-block magicboxie-wifi-startup
 
 start:
