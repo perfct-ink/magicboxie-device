@@ -7,10 +7,12 @@ TRANSCODE_DIR := /var/lib/magicboxie/transcoded
 # Override (e.g. to empty) for a device with no home server to sync with.
 HOME_SERVER_URL := http://magicboxie.lan
 # The home server login lives in a root-readable file outside Git, loaded by
-# the unit (EnvironmentFile), so redeploys and self-updates never lose it.
-# Never commit a real password: edit this file on the device, or pass it once
-# at deploy time with `make service HOME_SERVER_PASSWORD=...`.
+# the unit (EnvironmentFile), so redeploys and self-updates never lose it. It
+# is seeded once with the default below (a deliberately low-security home
+# server login); edit the file on the device to change it, or pass
+# `make service HOME_SERVER_PASSWORD=...` to overwrite it.
 HOME_SERVER_PASSWORD :=
+HOME_SERVER_DEFAULT_PASSWORD := 123456
 HOME_SERVER_ENV := /var/lib/magicboxie/home-server.env
 # Fixed absolute path on the Pi where content lives - independent of wherever
 # this repo happens to be checked out, unlike MOVIES_DIR above (which is
@@ -145,6 +147,7 @@ service: setup
 		printf 'MAGICBOXIE_HOME_SERVER_PASSWORD="%s"\n' '$(HOME_SERVER_PASSWORD)' | sudo tee $(HOME_SERVER_ENV) >/dev/null && sudo chmod 600 $(HOME_SERVER_ENV); \
 	elif [ ! -e $(HOME_SERVER_ENV) ]; then \
 		old="$$(sed -n 's/^Environment=MAGICBOXIE_HOME_SERVER_PASSWORD=//p' $(SERVICE_FILE) 2>/dev/null)"; \
+		old="$${old:-$(HOME_SERVER_DEFAULT_PASSWORD)}"; \
 		printf '# Home server login (see pi/Makefile). One line, then: sudo systemctl restart magicboxie-player\nMAGICBOXIE_HOME_SERVER_PASSWORD="%s"\n' "$$old" | sudo tee $(HOME_SERVER_ENV) >/dev/null && sudo chmod 600 $(HOME_SERVER_ENV); \
 	fi
 	sed \

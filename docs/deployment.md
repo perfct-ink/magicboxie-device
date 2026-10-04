@@ -267,7 +267,8 @@ when a download starts and resumes afterwards.
 
 The server login is stored on the device in
 `/var/lib/magicboxie/home-server.env` (mode `600`, outside Git), as
-`MAGICBOXIE_HOME_SERVER_PASSWORD="..."`. Edit it with
+`MAGICBOXIE_HOME_SERVER_PASSWORD="..."`. It is seeded with the default
+home server login (`123456`) the first time. Edit it with
 `sudoedit /var/lib/magicboxie/home-server.env`, then run
 `sudo systemctl restart magicboxie-player`. Updates and redeploys keep it. A
 password passed once with `make pi-service HOME_SERVER_PASSWORD=...` is also
