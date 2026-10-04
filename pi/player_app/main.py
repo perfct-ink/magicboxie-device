@@ -258,7 +258,8 @@ async def _run_status_message(controller: PlaybackController, stop_event: asynci
             shown = message
             if controller.is_idle:
                 await controller.show_idle_screen()
-        await sleep_unless_stopped(stop_event, 2)
+        # Nothing to show over a playing movie, so check rarely then.
+        await sleep_unless_stopped(stop_event, 2 if controller.is_idle else 10)
 
 
 async def _run_keyboard(controller: PlaybackController, stop_event: asyncio.Event) -> None:

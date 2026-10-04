@@ -28,6 +28,11 @@ _INTERNET_CHECK_TIMEOUT_SECONDS = 2.0
 _INTERNET_CHECK_CACHE_SECONDS = 30.0
 _internet_cache: Optional[Tuple[float, bool]] = None
 
+# vcgencmd is a subprocess spawn: cache it so status polls (several phones,
+# the settings panel) never cost a spawn each - important while a movie plays.
+_THROTTLE_CACHE_SECONDS = 30.0
+_throttle_cache: Optional[Tuple[float, Optional["ThrottleStatus"]]] = None
+
 
 async def sleep_unless_stopped(stop_event: asyncio.Event, seconds: float) -> None:
     """Sleeps for `seconds`, waking early if `stop_event` is set. Shared by
@@ -76,6 +81,17 @@ class ThrottleStatus:
 
 
 async def get_throttle_status() -> Optional[ThrottleStatus]:
+    """Cached for _THROTTLE_CACHE_SECONDS - see _read_throttle_status."""
+    global _throttle_cache
+    now = time.monotonic()
+    if _throttle_cache is not None and now - _throttle_cache[0] < _THROTTLE_CACHE_SECONDS:
+        return _throttle_cache[1]
+    status = await _read_throttle_status()
+    _throttle_cache = (now, status)
+    return status
+
+
+async def _read_throttle_status() -> Optional[ThrottleStatus]:
     """Runs `vcgencmd get_throttled` - the project's own prior suspicion
     (a Pi Zero W repeatedly going unreachable under load) was an
     undervoltage/power-supply issue, and this is the actual, authoritative

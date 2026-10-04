@@ -1,6 +1,8 @@
 import asyncio
 from unittest.mock import AsyncMock, patch
 
+import pytest
+
 from player_app.util import ThrottleStatus, cpu_temperature_celsius, get_throttle_status
 
 # Real vcgencmd subprocess creation is patched out so these tests don't
@@ -66,6 +68,21 @@ def test_get_throttle_status_returns_none_on_unexpected_output():
         status = asyncio.run(get_throttle_status())
 
     assert status is None
+
+
+@pytest.fixture(autouse=True)
+def _no_throttle_cache():
+    with patch.object(util, "_throttle_cache", None):
+        yield
+
+
+def test_get_throttle_status_is_cached_between_calls():
+    process = AsyncMock(return_value=FakeProcess(stdout=b"throttled=0x0\n"))
+    with patch(_PATCH_TARGET, new=process):
+        asyncio.run(get_throttle_status())
+        asyncio.run(get_throttle_status())
+
+    assert process.await_count == 1
 
 
 # --- internet_reachable -----------------------------------------------------

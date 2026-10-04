@@ -91,7 +91,17 @@ async function load() {
   try {movies = await api('/api/movies');} catch (error) {$('grid').textContent = 'Could not load movies. Reload this page to try again.'; return;}
   render();
 }
-load().then(status); setInterval(status, 3000);
+// Poll gently: not at all while the tab is hidden, and less often while a
+// movie plays, so the page never competes with playback on the device.
+function pollStatus() {
+  const delay = state.status === 'playing' ? 6000 : 3000;
+  setTimeout(async () => {
+    if (!document.hidden) await status();
+    pollStatus();
+  }, delay);
+}
+document.addEventListener('visibilitychange', () => {if (!document.hidden) status();});
+load().then(status); pollStatus();
 
 // ---- Settings (gear): device details and reboot ----
 let settingsTimer = null;
@@ -174,7 +184,7 @@ function openSettings() {
   close.addEventListener('click', closeSheet);
   row.append(reboot, shutdown, close); body.append(h, details, note, row); panel.append(body);
   $('sheet').classList.remove('hidden');
-  refreshSettings(); clearInterval(settingsTimer); settingsTimer = setInterval(refreshSettings, 5000);
+  refreshSettings(); clearInterval(settingsTimer); settingsTimer = setInterval(() => {if (!document.hidden) refreshSettings();}, 5000);
 }
 $('gear').addEventListener('click', openSettings);
 

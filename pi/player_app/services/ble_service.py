@@ -21,6 +21,8 @@ from .wifi_provisioning import apply_wifi_credentials
 logger = logging.getLogger(__name__)
 
 STATUS_POLL_INTERVAL_SECONDS = 1.0
+# Position updates are coarse anyway; poll mpv half as often while it plays.
+PLAYING_STATUS_POLL_INTERVAL_SECONDS = 2.0
 
 
 class MagicBoxieService(Service):
@@ -43,7 +45,8 @@ class MagicBoxieService(Service):
 
     async def _poll_status_loop(self) -> None:
         while True:
-            await asyncio.sleep(STATUS_POLL_INTERVAL_SECONDS)
+            await asyncio.sleep(
+                STATUS_POLL_INTERVAL_SECONDS if self._controller.is_idle else PLAYING_STATUS_POLL_INTERVAL_SECONDS)
             await self._refresh_status()
             self._refresh_transcode_status()
             self._refresh_update_status()

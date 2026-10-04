@@ -18,6 +18,8 @@ from ..controllers.playback_controller import PlaybackController
 logger = logging.getLogger(__name__)
 
 RESCAN_INTERVAL_SECONDS = 5.0
+# While a movie plays, check for hot-plugged keyboards less often.
+PLAYING_RESCAN_INTERVAL_SECONDS = 15.0
 
 
 class KeyboardService:
@@ -36,7 +38,7 @@ class KeyboardService:
                     # Plugged in/unplugged while idle: refresh the footer hint.
                     await self._controller.show_idle_screen()
                 try:
-                    await asyncio.wait_for(stop_event.wait(), timeout=RESCAN_INTERVAL_SECONDS)
+                    await asyncio.wait_for(stop_event.wait(), timeout=RESCAN_INTERVAL_SECONDS if self._controller.is_idle else PLAYING_RESCAN_INTERVAL_SECONDS)
                 except asyncio.TimeoutError:
                     continue
         finally:
