@@ -42,7 +42,9 @@ function render() {
     const cap = document.createElement('div'); cap.className = 'cap'; cap.textContent = m.title;
     if (meta(m)) {const s = document.createElement('small'); s.textContent = meta(m); cap.append(s);}
     card.append(p, cap);
-    if (m.needs_transcoding) {const b = document.createElement('span'); b.className = 'badge'; b.textContent = 'Optimizing…'; card.append(b);}
+    // Only one movie is transcoded at a time; the rest of the backlog is just queued.
+    const badge = m.id === state.transcoding_movie_id ? 'Optimizing…' : m.needs_transcoding ? 'Queued' : '';
+    if (badge) {const b = document.createElement('span'); b.className = 'badge'; b.textContent = badge; card.append(b);}
     card.addEventListener('click', () => openSheet(m)); grid.append(card);
   }
 }
@@ -72,7 +74,10 @@ $('seek').addEventListener('input', () => {seeking = true;});
 $('seek').addEventListener('change', () => {seeking = false; command('seek', Number($('seek').value));});
 async function status() {
   try {
+    const previous = state.transcoding_movie_id;
     state = await api('/api/status'); $('conn').textContent = 'Connected';
+    // A transcode started or finished: reload so "Queued" badges are current.
+    if (previous !== undefined && previous !== state.transcoding_movie_id) await load();
     const m = movies.find(x => x.id === state.movie_id), active = m && state.status !== 'stopped';
     $('bar').classList.toggle('hidden', !active); $('hero').classList.toggle('hidden', !active);
     if (active) {

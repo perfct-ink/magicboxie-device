@@ -719,3 +719,18 @@ def test_shutdown_reports_success_and_failure():
     assert asyncio.run(scenario(None)) == (200, {"ok": True})
     status, body = asyncio.run(scenario("not permitted"))
     assert status == 500 and body["error"] == "not permitted"
+
+
+def test_status_reports_the_single_movie_being_transcoded():
+    async def scenario():
+        client, controller = await _make_client()
+        try:
+            controller.currently_transcoding_movie_id = 1
+            with patch("web.web_service.get_throttle_status", new=AsyncMock(return_value=None)), \
+                    patch("web.web_service.internet_reachable", new=AsyncMock(return_value=True)):
+                response = await client.get("/api/status")
+                return await response.json()
+        finally:
+            await client.close()
+
+    assert asyncio.run(scenario())["transcoding_movie_id"] == 1

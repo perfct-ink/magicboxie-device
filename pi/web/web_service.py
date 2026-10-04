@@ -325,6 +325,7 @@ async def _get_status(request: web.Request) -> web.Response:
         "position_seconds": state.position_seconds,
         "syncing_movie_title": controller.currently_syncing_movie_title,
         "update_status": controller.update_status,
+        "transcoding_movie_id": controller.currently_transcoding_movie_id,
         "cpu_temperature_celsius": cpu_temperature_celsius(),
         "under_voltage": throttle.under_voltage if throttle else None,
         "throttled": throttle.throttled if throttle else None,
