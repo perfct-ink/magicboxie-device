@@ -16,3 +16,15 @@ document.getElementById('copy').addEventListener('click', async () => {
     note.textContent = 'Address selected. Copy it, then paste it into your browser.';
   }
 });
+
+// Done: tell the device this phone has the address, then re-run the OS
+// probe (which now returns "success") so the sign-in sheet closes itself.
+document.getElementById('done').addEventListener('click', async () => {
+  try {
+    await fetch('/api/portal/done', {method: 'POST'});
+    note.textContent = 'All set. Open your browser and go to ' + address;
+    location.href = '/hotspot-detect.html';
+  } catch (error) {
+    note.textContent = 'Could not finish. Close this window and open ' + address + ' in your browser.';
+  }
+});

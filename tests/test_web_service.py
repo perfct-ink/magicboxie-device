@@ -670,6 +670,27 @@ def test_post_movie_accepts_a_percent_encoded_filename(tmp_path):
     assert not (tmp_path / "escape.mp4").exists()
 
 
+def test_done_releases_only_that_client_from_the_probe_redirect():
+    async def scenario():
+        client, _ = await _make_client()
+        try:
+            probes = {"/generate_204": 204, "/hotspot-detect.html": 200, "/connecttest.txt": 200}
+            for path in probes:
+                assert (await client.get(path, allow_redirects=False)).status == 302
+            done = await client.post("/api/portal/done")
+            assert done.status == 200
+            for path, status in probes.items():
+                response = await client.get(path, allow_redirects=False)
+                assert response.status == status
+            assert "Success" in await (await client.get("/hotspot-detect.html")).text()
+            # Other unknown pages still lead to the welcome page.
+            other = await client.get("/something-else", allow_redirects=False)
+            assert other.status == 302
+        finally:
+            await client.close()
+    asyncio.run(scenario())
+
+
 def test_welcome_page_only_points_to_the_browser():
     async def scenario():
         client, _ = await _make_client()

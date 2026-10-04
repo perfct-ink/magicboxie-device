@@ -8,6 +8,7 @@ in Docker Desktop on macOS) or no BLE-capable client at hand.
 from __future__ import annotations
 
 import logging
+import time
 import uuid
 from pathlib import Path
 from urllib.parse import unquote
@@ -28,6 +29,25 @@ logger = logging.getLogger(__name__)
 
 _OPCODE_BY_NAME = {opcode.name.lower(): opcode for opcode in Opcode}
 _CONTROLLER_KEY = web.AppKey("controller", PlaybackController)
+# Phones (by address) that tapped Done on the welcome page. Their OS probe
+# URLs then get the "internet works" answer, so the sign-in sheet closes by
+# itself. In memory only: a restart just shows the sheet again.
+_RELEASED_KEY = web.AppKey("released", dict)
+_RELEASE_SECONDS = 24 * 3600
+_MAX_RELEASED = 256
+
+# What each OS expects from its connectivity probe when there is "no captive
+# portal": Apple a "Success" page, Android/Chrome an empty 204, Windows a
+# fixed string.
+_PROBE_RESPONSES = {
+    "/hotspot-detect.html": ("<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>", 200, "text/html"),
+    "/library/test/success.html": ("<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>", 200, "text/html"),
+    "/generate_204": ("", 204, "text/plain"),
+    "/gen_204": ("", 204, "text/plain"),
+    "/connecttest.txt": ("Microsoft Connect Test", 200, "text/plain"),
+    "/ncsi.txt": ("Microsoft NCSI", 200, "text/plain"),
+    "/success.txt": ("success\n", 200, "text/plain"),
+}
 
 # Generous but bounded - movie files are large, but this still guards against
 # a truly unbounded upload filling the disk.
@@ -39,6 +59,7 @@ _UPLOAD_CHUNK_BYTES = 1024 * 1024  # 1MB
 def create_app(controller: PlaybackController) -> web.Application:
     app = web.Application(client_max_size=_MAX_UPLOAD_BYTES)
     app[_CONTROLLER_KEY] = controller
+    app[_RELEASED_KEY] = {}
 
     app.router.add_get("/", _get_portal)
     app.router.add_get("/welcome", _get_welcome)
@@ -57,6 +78,7 @@ def create_app(controller: PlaybackController) -> web.Application:
     app.router.add_get("/api/info", _get_info)
     app.router.add_post("/api/reboot", _post_reboot)
     app.router.add_post("/api/shutdown", _post_shutdown)
+    app.router.add_post("/api/portal/done", _post_portal_done)
     # Android, Apple, and Windows probe different HTTP paths. An unexpected
     # HTML redirect (rather than their expected success response) opens login.
     app.router.add_get("/{path:.*}", _redirect_to_portal)
@@ -78,9 +100,34 @@ async def _get_welcome(request: web.Request) -> web.Response:
     return web.Response(text=WELCOME_PAGE, content_type="text/html", headers={"Cache-Control": "no-store"})
 
 
+def _is_released(request: web.Request) -> bool:
+    released = request.app[_RELEASED_KEY]
+    since = released.get(request.remote)
+    if since is None:
+        return False
+    if time.monotonic() - since > _RELEASE_SECONDS:
+        del released[request.remote]
+        return False
+    return True
+
+
+async def _post_portal_done(request: web.Request) -> web.Response:
+    """The phone's user tapped Done on the welcome page: stop showing them
+    the sign-in sheet (see _PROBE_RESPONSES)."""
+    released = request.app[_RELEASED_KEY]
+    if len(released) >= _MAX_RELEASED:
+        del released[min(released, key=released.get)]
+    released[request.remote] = time.monotonic()
+    return web.json_response({"ok": True})
+
+
 async def _redirect_to_portal(request: web.Request) -> web.Response:
     if request.path.startswith("/api/"):
         raise web.HTTPNotFound()
+    probe = _PROBE_RESPONSES.get(request.path)
+    if probe and _is_released(request):
+        body, status, content_type = probe
+        return web.Response(text=body, status=status, content_type=content_type, headers={"Cache-Control": "no-store"})
     raise web.HTTPFound(WELCOME_URL, headers={"Cache-Control": "no-store"})
 
 
