@@ -79,6 +79,11 @@ async function status() {
     // A transcode started or finished: reload so "Queued" badges are current.
     if (previous !== undefined && previous !== state.transcoding_movie_id) await load();
     const m = movies.find(x => x.id === state.movie_id), active = m && state.status !== 'stopped';
+    // Top-right spinner while the device is transcoding (one movie at a time).
+    const optimizing = movies.find(x => x.id === state.transcoding_movie_id);
+    const busyLabel = optimizing ? 'Optimizing ' + optimizing.title : 'Optimizing a movie';
+    $('busy').classList.toggle('hidden', state.transcoding_movie_id == null);
+    $('busy').title = busyLabel; $('busy').setAttribute('aria-label', busyLabel);
     $('bar').classList.toggle('hidden', !active); $('hero').classList.toggle('hidden', !active);
     if (active) {
       $('barTitle').textContent = m.title; $('heroTitle').textContent = m.title;
@@ -193,6 +198,7 @@ function openSettings() {
   refreshSettings(); clearInterval(settingsTimer); settingsTimer = setInterval(() => {if (!document.hidden) refreshSettings();}, 5000);
 }
 $('gear').addEventListener('click', openSettings);
+$('busy').addEventListener('click', openSettings);
 
 // ---- Upload movies from this browser ----
 function uploadOne(file) {
