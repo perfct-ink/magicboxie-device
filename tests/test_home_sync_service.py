@@ -343,3 +343,63 @@ def test_check_in_defers_scan_and_metadata_when_playback_starts_mid_cycle(tmp_pa
         "year": 1999,
         "duration_seconds": 123,
     }
+
+
+def _items(*names):
+    return {
+        "Items": [
+            {"Id": str(i), "Name": name, "MagicBoxieStatus": "ready", "MagicBoxieOriginalFilename": f"{name}.mp4"}
+            for i, name in enumerate(names, start=1)
+        ],
+        "TotalRecordCount": len(names),
+        "StartIndex": 0,
+    }
+
+
+def test_check_in_is_busy_while_downloading_and_clears_afterwards(tmp_path):
+    library = _library(tmp_path)
+    states = []
+    sync = HomeServerSync(library, BASE_URL, "secret", on_busy=states.append)
+
+    with aioresponses() as mocked:
+        mocked.post(f"{BASE_URL}/Users/AuthenticateByName", payload={"AccessToken": "tok"}, repeat=True)
+        mocked.get(f"{BASE_URL}/Users/1/Items?IncludeItemTypes=Movie&Recursive=true", payload=_items("Alpha"))
+        mocked.get(f"{BASE_URL}/Videos/1/stream?static=true", body=b"bytes")
+        asyncio.run(sync.check_in())
+
+    assert states == [True, False]
+
+
+def test_check_in_is_not_busy_when_there_is_nothing_to_download(tmp_path):
+    library = _library(tmp_path)
+    (tmp_path / "movies" / "Alpha.mp4").write_bytes(b"here")
+    library.scan()
+    states = []
+    sync = HomeServerSync(library, BASE_URL, "secret", on_busy=states.append)
+
+    with aioresponses() as mocked:
+        mocked.post(f"{BASE_URL}/Users/AuthenticateByName", payload={"AccessToken": "tok"}, repeat=True)
+        mocked.get(f"{BASE_URL}/Users/1/Items?IncludeItemTypes=Movie&Recursive=true", payload=_items("Alpha"))
+        asyncio.run(sync.check_in())
+
+    assert states == [False]
+
+
+def test_busy_is_cleared_even_if_the_check_in_raises(tmp_path):
+    library = _library(tmp_path)
+    states = []
+    sync = HomeServerSync(library, BASE_URL, "secret", on_busy=states.append)
+
+    async def boom(*args, **kwargs):
+        raise RuntimeError("unexpected")
+
+    sync._download_movie = boom
+    with aioresponses() as mocked:
+        mocked.post(f"{BASE_URL}/Users/AuthenticateByName", payload={"AccessToken": "tok"}, repeat=True)
+        mocked.get(f"{BASE_URL}/Users/1/Items?IncludeItemTypes=Movie&Recursive=true", payload=_items("Alpha"))
+        try:
+            asyncio.run(sync.check_in())
+        except RuntimeError:
+            pass
+
+    assert states[-1] is False

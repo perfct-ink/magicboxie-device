@@ -5,10 +5,13 @@ THUMBNAIL_DIR := /var/lib/magicboxie/thumbnails
 TRANSCODE_DIR := /var/lib/magicboxie/transcoded
 # MagicBoxie-web's LAN hostname - see player_app/services/home_sync_service.py.
 # Override (e.g. to empty) for a device with no home server to sync with.
-HOME_SERVER_URL := http://magicboxie.local
-# Deliberately no default (and never commit a real one here) - pass on the
-# command line at deploy time: make service HOME_SERVER_PASSWORD=...
+HOME_SERVER_URL := http://magicboxie.lan
+# The home server login lives in a root-readable file outside Git, loaded by
+# the unit (EnvironmentFile), so redeploys and self-updates never lose it.
+# Never commit a real password: edit this file on the device, or pass it once
+# at deploy time with `make service HOME_SERVER_PASSWORD=...`.
 HOME_SERVER_PASSWORD :=
+HOME_SERVER_ENV := /var/lib/magicboxie/home-server.env
 # Fixed absolute path on the Pi where content lives - independent of wherever
 # this repo happens to be checked out, unlike MOVIES_DIR above (which is
 # Docker-dev-only, relative to the repo, and unrelated to the real device).
@@ -136,14 +139,22 @@ service: setup
 	@# Renamed from magicboxie-device: retire the old unit so two daemons never contend for the ports.
 	-sudo systemctl disable --now magicboxie-device 2>/dev/null
 	sudo rm -f /etc/systemd/system/magicboxie-device.service
+	@# Home server password: an explicit value wins; otherwise keep one an earlier
+	@# deploy baked into the unit (moved to the env file once); otherwise seed a template.
+	@if [ -n "$(HOME_SERVER_PASSWORD)" ]; then \
+		printf 'MAGICBOXIE_HOME_SERVER_PASSWORD="%s"\n' '$(HOME_SERVER_PASSWORD)' | sudo tee $(HOME_SERVER_ENV) >/dev/null && sudo chmod 600 $(HOME_SERVER_ENV); \
+	elif [ ! -e $(HOME_SERVER_ENV) ]; then \
+		old="$$(sed -n 's/^Environment=MAGICBOXIE_HOME_SERVER_PASSWORD=//p' $(SERVICE_FILE) 2>/dev/null)"; \
+		printf '# Home server login (see pi/Makefile). One line, then: sudo systemctl restart magicboxie-player\nMAGICBOXIE_HOME_SERVER_PASSWORD="%s"\n' "$$old" | sudo tee $(HOME_SERVER_ENV) >/dev/null && sudo chmod 600 $(HOME_SERVER_ENV); \
+	fi
 	sed \
 		-e 's|@USER@|'"$$(whoami)"'|g' \
 		-e 's|@REPO_DIR@|$(CURDIR)|g' \
 		-e 's|@MOVIES_DIR@|$(CONTENT_DIR)|g' \
+		-e 's|@HOME_SERVER_ENV@|$(HOME_SERVER_ENV)|g' \
 		-e 's|@THUMBNAIL_DIR@|$(THUMBNAIL_DIR)|g' \
 		-e 's|@TRANSCODE_DIR@|$(TRANSCODE_DIR)|g' \
 		-e 's|@HOME_SERVER_URL@|$(HOME_SERVER_URL)|g' \
-		-e 's|@HOME_SERVER_PASSWORD@|$(HOME_SERVER_PASSWORD)|g' \
 		system/magicboxie-player.service.in | sudo tee $(SERVICE_FILE) >/dev/null
 	sudo systemctl daemon-reload
 	sudo systemctl enable $(SERVICE_NAME)

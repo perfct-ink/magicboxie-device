@@ -413,6 +413,7 @@ async def _run_home_sync(controller: PlaybackController, stop_event: asyncio.Eve
         HOME_SERVER_PASSWORD,
         on_progress=set_syncing_title,
         is_idle=lambda: controller.is_idle,
+        on_busy=lambda busy: setattr(controller, "sync_busy", busy),
     )
     redraw_task = asyncio.create_task(redraw_idle_screen())
     try:

@@ -224,3 +224,34 @@ def test_run_skips_a_movie_whose_ffmpeg_raises_and_continues(tmp_path):
     # One failed attempt (movie 0, raised) didn't crash the loop or wedge
     # movie 1 behind it forever.
     assert call_count == 2
+
+
+def test_transcode_does_not_run_while_a_download_is_in_progress(tmp_path):
+    controller = PlaybackController(FakeLibrary(transcode_dir=tmp_path), FakeMpv())
+    service = TranscodeService(controller)
+    assert service._may_run()
+    controller.sync_busy = True
+    assert not service._may_run()
+
+
+def test_running_transcode_stops_when_a_download_starts(tmp_path):
+    async def scenario():
+        controller = PlaybackController(FakeLibrary(transcode_dir=tmp_path), FakeMpv())
+        service = TranscodeService(controller)
+        process = FakeProcess(already_exited=False)
+
+        async def fake_exec(*args, **kwargs):
+            (tmp_path / "0.partial.mp4").write_bytes(b"still encoding")
+            return process
+
+        with patch(_PATCH_TARGET, side_effect=fake_exec), \
+                patch("player_app.services.transcode_service.PLAYBACK_CHECK_INTERVAL_SECONDS", 0.01):
+            task = asyncio.create_task(service._transcode(movie_id=0))
+            await asyncio.sleep(0)
+            controller.sync_busy = True  # the home server has movies to fetch
+            await asyncio.wait_for(task, timeout=5)
+        return process
+
+    process = asyncio.run(scenario())
+    assert process.terminated
+    assert not (tmp_path / "0.partial.mp4").exists()

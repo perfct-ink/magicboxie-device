@@ -43,6 +43,7 @@ class HomeServerSync:
         password: str,
         on_progress: Optional[Callable[[Optional[str]], None]] = None,
         is_idle: Callable[[], bool] = lambda: True,
+        on_busy: Optional[Callable[[bool], None]] = None,
     ):
         self._library = library
         self._base_url = base_url.rstrip("/")
@@ -57,6 +58,9 @@ class HomeServerSync:
         # Keep registration alive while playing, but defer downloads and
         # probing until idle so they do not compete with video decoding.
         self._is_idle = is_idle
+        # True from the moment there are movies to download until the check-in
+        # ends, so transcoding (CPU- and disk-heavy) yields to the download.
+        self._on_busy = on_busy or (lambda _busy: None)
         # Movies downloaded in an earlier check-in whose library.scan() (and
         # metadata save) got deferred because playback started before this
         # cycle reached that point - retried on a later, idle cycle rather
@@ -67,6 +71,12 @@ class HomeServerSync:
         self._pending_metadata: List[dict] = []
 
     async def check_in(self) -> None:
+        try:
+            await self._check_in()
+        finally:
+            self._on_busy(False)
+
+    async def _check_in(self) -> None:
         async with aiohttp.ClientSession() as session:
             try:
                 remote_movies = await self._register_and_list_movies(session)
@@ -80,6 +90,8 @@ class HomeServerSync:
 
             existing_titles = {movie.title for movie in self._library.movies}
             to_download = [m for m in remote_movies if m["Name"] not in existing_titles]
+            if to_download:
+                self._on_busy(True)
             if to_download:
                 # /devices/register (the common path above) lists movies
                 # without authenticating, but the video bytes themselves are

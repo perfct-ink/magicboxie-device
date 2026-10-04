@@ -61,6 +61,9 @@ class PlaybackController:
         # it's still downloading (library._stable_id only ever runs against
         # files that already exist on disk).
         self.currently_syncing_movie_title: Optional[str] = None
+        # True while the home server has movies to download and this device
+        # is fetching them - TranscodeService yields to it: downloads first.
+        self.sync_busy: bool = False
         # Names of attached keyboards, maintained by KeyboardService and
         # shown in the idle screen's footer hint.
         self.keyboard_names: list[str] = []

@@ -53,7 +53,7 @@ class TranscodeService:
 
     async def run(self, stop_event: asyncio.Event) -> None:
         while not stop_event.is_set():
-            movie = self._next_movie_needing_transcode() if self._controller.is_idle else None
+            movie = self._next_movie_needing_transcode() if self._may_run() else None
             if movie is None:
                 await sleep_unless_stopped(stop_event, IDLE_POLL_INTERVAL_SECONDS)
                 continue
@@ -66,6 +66,11 @@ class TranscodeService:
                 # move on; the outer loop just tries the next one.
                 logger.exception("Transcoding movie %d failed unexpectedly", movie.id)
                 self._failed_movie_ids.add(movie.id)
+
+    def _may_run(self) -> bool:
+        """Only while nothing plays, and never while movies are downloading
+        from the home server: downloads take priority over transcoding."""
+        return self._controller.is_idle and not self._controller.sync_busy
 
     def _next_movie_needing_transcode(self) -> Optional[Movie]:
         for movie in self._controller.movies:
@@ -94,8 +99,8 @@ class TranscodeService:
         )
         try:
             while process.returncode is None:
-                if not self._controller.is_idle:
-                    logger.info("Playback started - pausing transcode of %s", source.name)
+                if not self._may_run():
+                    logger.info("Playback or a download started - pausing transcode of %s", source.name)
                     process.terminate()
                     await process.wait()
                     return
