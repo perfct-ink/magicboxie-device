@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import socket
 import time
+from urllib.parse import urlsplit
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Tuple
@@ -43,6 +44,21 @@ async def sleep_unless_stopped(stop_event: asyncio.Event, seconds: float) -> Non
         await asyncio.wait_for(stop_event.wait(), timeout=seconds)
     except asyncio.TimeoutError:
         pass
+
+
+async def host_resolves(url: str, timeout: float = 3.0) -> bool:
+    """Whether the host in `url` currently resolves in DNS. The home server
+    (magicboxie.lan) only exists on the home network, so this is a cheap
+    "are we on that network" test that needs no SSID or interface knowledge
+    and also works over Ethernet. False on any failure or timeout."""
+    host = urlsplit(url).hostname
+    if not host:
+        return False
+    try:
+        await asyncio.wait_for(asyncio.get_running_loop().getaddrinfo(host, None), timeout=timeout)
+    except (OSError, asyncio.TimeoutError):
+        return False
+    return True
 
 
 def local_ip() -> str:

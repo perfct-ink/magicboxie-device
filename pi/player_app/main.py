@@ -27,7 +27,7 @@ from .models.library import MovieLibrary
 from .views.player import MpvController
 from .update_status import read_message, read_status
 from .storage import run_io
-from .util import local_ip, sleep_unless_stopped
+from .util import host_resolves, local_ip, sleep_unless_stopped
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +73,9 @@ HOME_SERVER_PASSWORD = os.environ.get("MAGICBOXIE_HOME_SERVER_PASSWORD", "")
 # movies promptly whenever it happens to be on the home WiFi, and a failed
 # check-in (server unreachable) is cheap and expected - see HomeServerSync.
 HOME_SERVER_CHECKIN_SECONDS = int(os.environ.get("MAGICBOXIE_HOME_SERVER_CHECKIN_SECONDS", "60"))
+# While the server's name does not resolve (not on the home network), look
+# again this often, so a sync starts soon after joining that network.
+HOME_SERVER_RESOLVE_RETRY_SECONDS = 15
 
 
 def _mpv_output_args() -> List[str]:
@@ -418,6 +421,9 @@ async def _run_home_sync(controller: PlaybackController, stop_event: asyncio.Eve
     redraw_task = asyncio.create_task(redraw_idle_screen())
     try:
         while not stop_event.is_set():
+            if not await host_resolves(HOME_SERVER_URL):
+                await sleep_unless_stopped(stop_event, HOME_SERVER_RESOLVE_RETRY_SECONDS)
+                continue
             try:
                 await sync.check_in()
             except Exception:

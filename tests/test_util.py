@@ -129,3 +129,29 @@ def test_internet_reachable_caches_result_between_calls():
         assert asyncio.run(util.internet_reachable()) is True
 
     assert connect.await_count == 1
+
+
+# --- host_resolves ----------------------------------------------------------
+
+
+def _resolver(result):
+    async def getaddrinfo(self_or_host, *args, **kwargs):
+        if isinstance(result, Exception):
+            raise result
+        return result
+    return getaddrinfo
+
+
+def test_host_resolves_true_when_dns_answers():
+    loop_patch = patch("asyncio.BaseEventLoop.getaddrinfo", new=_resolver([("addr",)]))
+    with loop_patch:
+        assert asyncio.run(util.host_resolves("http://magicboxie.lan")) is True
+
+
+def test_host_resolves_false_when_dns_fails():
+    with patch("asyncio.BaseEventLoop.getaddrinfo", new=_resolver(OSError("no such host"))):
+        assert asyncio.run(util.host_resolves("http://magicboxie.lan")) is False
+
+
+def test_host_resolves_false_for_an_empty_url():
+    assert asyncio.run(util.host_resolves("")) is False

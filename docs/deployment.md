@@ -259,8 +259,10 @@ and its listener over SSH.
 
 ## Downloading movies from the home server
 
-When the device can reach the home server (default `http://magicboxie.lan`,
-for example after joining the Mitera Wi-Fi), it checks in every minute and
+The home server's name (default `http://magicboxie.lan`) only resolves on the
+Mitera network. The device tests whether it resolves every 15 seconds, so a
+sync starts soon after joining Mitera (by Wi-Fi or Ethernet) and nothing is
+attempted elsewhere. Once it resolves, the device checks in every minute and
 downloads movies it does not have yet, one at a time, while nothing is
 playing. Downloads take priority over transcoding: a running transcode stops
 when a download starts and resumes afterwards.
