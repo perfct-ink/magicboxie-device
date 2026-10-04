@@ -39,6 +39,20 @@ _MAX_RELEASED = 256
 # What each OS expects from its connectivity probe when there is "no captive
 # portal": Apple a "Success" page, Android/Chrome an empty 204, Windows a
 # fixed string.
+# How often the web page should ask for status: the device tells it, so the
+# page backs off whenever the device is busy (a transcode is CPU-heavy, and
+# playback needs every cycle it can get).
+_POLL_SECONDS_IDLE = 3
+_POLL_SECONDS_PLAYING = 6
+_POLL_SECONDS_TRANSCODING = 10
+
+
+def _poll_seconds(controller: PlaybackController, playing: bool) -> int:
+    if controller.currently_transcoding_movie_id is not None:
+        return _POLL_SECONDS_TRANSCODING
+    return _POLL_SECONDS_PLAYING if playing else _POLL_SECONDS_IDLE
+
+
 _PROBE_RESPONSES = {
     "/hotspot-detect.html": ("<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>", 200, "text/html"),
     "/library/test/success.html": ("<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>", 200, "text/html"),
@@ -326,6 +340,7 @@ async def _get_status(request: web.Request) -> web.Response:
         "syncing_movie_title": controller.currently_syncing_movie_title,
         "update_status": controller.update_status,
         "transcoding_movie_id": controller.currently_transcoding_movie_id,
+        "poll_seconds": _poll_seconds(controller, state.status.name.lower() == "playing"),
         "cpu_temperature_celsius": cpu_temperature_celsius(),
         "under_voltage": throttle.under_voltage if throttle else None,
         "throttled": throttle.throttled if throttle else None,

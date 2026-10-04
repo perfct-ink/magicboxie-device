@@ -734,3 +734,19 @@ def test_status_reports_the_single_movie_being_transcoded():
             await client.close()
 
     assert asyncio.run(scenario())["transcoding_movie_id"] == 1
+
+
+def test_status_tells_the_page_how_often_to_poll():
+    async def scenario(transcoding_id):
+        client, controller = await _make_client()
+        try:
+            controller.currently_transcoding_movie_id = transcoding_id
+            with patch("web.web_service.get_throttle_status", new=AsyncMock(return_value=None)), \
+                    patch("web.web_service.internet_reachable", new=AsyncMock(return_value=True)):
+                response = await client.get("/api/status")
+                return (await response.json())["poll_seconds"]
+        finally:
+            await client.close()
+
+    assert asyncio.run(scenario(None)) == 3      # idle
+    assert asyncio.run(scenario(1)) == 10        # transcoding: back off

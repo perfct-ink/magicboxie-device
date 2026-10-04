@@ -99,7 +99,8 @@ async function load() {
 // Poll gently: not at all while the tab is hidden, and less often while a
 // movie plays, so the page never competes with playback on the device.
 function pollStatus() {
-  const delay = state.status === 'playing' ? 6000 : 3000;
+  // The device says how often to ask: slower while it plays or transcodes.
+  const delay = Math.min(30, Math.max(2, state.poll_seconds || 3)) * 1000;
   setTimeout(async () => {
     if (!document.hidden) await status();
     pollStatus();
