@@ -72,10 +72,33 @@ $('back').addEventListener('click', () => command('seek', Math.max(0, Math.floor
 $('fwd').addEventListener('click', () => command('seek', Math.floor(state.position_seconds) + 15));
 $('seek').addEventListener('input', () => {seeking = true;});
 $('seek').addEventListener('change', () => {seeking = false; command('seek', Number($('seek').value));});
+// While a movie plays we assume it keeps playing: tick the elapsed time up
+// every second locally, and stop that ticker as soon as a poll returns (the
+// device's own position replaces it, and the ticker restarts from there).
+let ticker = null;
+function stopTicker() {clearInterval(ticker); ticker = null;}
+function showTime(m) {
+  $('barTitle').textContent = m.title;
+  const bt = document.createElement('small');
+  bt.textContent = (state.status === 'paused' ? 'Paused · ' : '') + fmt(state.position_seconds) + (m.duration_seconds ? ' / ' + fmt(m.duration_seconds) : '');
+  $('barTitle').append(bt);
+  if (!seeking) $('seek').value = state.position_seconds;
+}
+function startTicker(m) {
+  stopTicker();
+  if (state.status !== 'playing' || document.hidden) return;
+  ticker = setInterval(() => {
+    if (document.hidden) {stopTicker(); return;}
+    state.position_seconds += 1;
+    if (m.duration_seconds) state.position_seconds = Math.min(state.position_seconds, m.duration_seconds);
+    showTime(m);
+  }, 1000);
+}
 async function status() {
   try {
     const previous = state.transcoding_movie_id;
     state = await api('/api/status'); $('conn').textContent = 'Connected';
+    stopTicker();
     // A transcode started or finished: reload so "Queued" badges are current.
     if (previous !== undefined && previous !== state.transcoding_movie_id) await load();
     const m = movies.find(x => x.id === state.movie_id), active = m && state.status !== 'stopped';
@@ -86,13 +109,11 @@ async function status() {
     $('busy').title = busyLabel; $('busy').setAttribute('aria-label', busyLabel);
     $('bar').classList.toggle('hidden', !active); $('hero').classList.toggle('hidden', !active);
     if (active) {
-      $('barTitle').textContent = m.title; $('heroTitle').textContent = m.title;
-      const bt = document.createElement('small'); bt.textContent = (state.status === 'paused' ? 'Paused · ' : '') + fmt(state.position_seconds) + (m.duration_seconds ? ' / ' + fmt(m.duration_seconds) : '');
-      $('barTitle').append(bt);
+      $('heroTitle').textContent = m.title;
       $('toggle').textContent = state.status === 'playing' ? '❚❚' : '▶';
       $('heroImg').src = thumb(m);
       $('seek').max = m.duration_seconds || 0; $('seek').classList.toggle('hidden', !m.duration_seconds);
-      if (!seeking) $('seek').value = state.position_seconds;
+      showTime(m); startTicker(m);
     }
     render();
   } catch (error) {$('conn').textContent = 'Waiting for device…';}
