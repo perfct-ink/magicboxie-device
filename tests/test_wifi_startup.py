@@ -171,3 +171,24 @@ def test_profile_creation_gets_a_longer_timeout_and_logs_failure(caplog):
     assert all(timeout == wifi_startup.PROFILE_TIMEOUT_SECONDS for _, timeout in calls)
     assert "nmcli connection add type failed: Error: timeout" in caplog.text
     assert "pw" not in caplog.text
+
+
+def _ap_once():
+    modes = iter(["ap"])
+    return lambda timeout=2: next(modes, "")
+
+
+def test_search_stops_hotspot_then_restores_it_when_nothing_connects():
+    clock = Clock()
+    with patch.object(wifi_startup, "load_networks", return_value=[]), \
+            patch.object(wifi_startup, "nmcli") as nmcli, \
+            patch.object(wifi_startup, "connection_mode", side_effect=iter(["ap"]).__next__ if False else _ap_once()), \
+            patch.object(wifi_startup.time, "monotonic", clock.monotonic), \
+            patch.object(wifi_startup.time, "sleep", clock.sleep), \
+            patch.object(wifi_startup.subprocess, "run") as run:
+        wifi_startup.search()
+    commands = [call.args[0] for call in run.call_args_list]
+    assert commands == [["systemctl", "stop", "magicboxie-hotspot.service"],
+                        ["systemctl", "start", "magicboxie-hotspot.service"]]
+    nmcli.assert_any_call("connection", "down", "id", "magicboxie-hotspot", timeout=15)
+    assert clock.now >= 30

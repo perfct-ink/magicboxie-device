@@ -1,6 +1,6 @@
 [project]
 name = "magicboxie-player"
-version = "0.1.0"
+dynamic = ["version"]
 description = "MagicBoxie player daemon: BLE GATT control surface driving mpv for HDMI playback"
 requires-python = ">=3.9"
 dependencies = [
@@ -32,6 +32,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["player_app*", "web*"]
+
+[tool.setuptools.dynamic]
+version = {file = "VERSION"}
 
 [tool.setuptools.package-data]
 "web" = ["*.html", "static/*"]

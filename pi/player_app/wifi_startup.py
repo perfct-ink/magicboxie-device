@@ -138,6 +138,13 @@ def start_hotspot() -> None:
     subprocess.run(["systemctl", "start", "magicboxie-hotspot.service"], check=True)
 
 
+def finish_search() -> None:
+    if wait_for_saved_wifi():
+        request_self_update()
+    else:
+        start_hotspot()
+
+
 def retry_saved_wifi() -> None:
     if connection_mode() != "ap":
         return
@@ -147,16 +154,30 @@ def retry_saved_wifi() -> None:
     logger.info("Hotspot is idle; retrying saved Wi-Fi for up to %d seconds", STARTUP_WAIT_SECONDS)
     subprocess.run(["systemctl", "stop", "magicboxie-hotspot.service"], check=False)
     nmcli("connection", "down", "id", "magicboxie-hotspot", timeout=15)
-    if wait_for_saved_wifi():
-        request_self_update()
-    else:
-        start_hotspot()
+    finish_search()
+
+
+def search() -> None:
+    """Settings-menu "find networks": the single radio cannot broadcast and
+    scan at once, so drop the hotspot, give saved Wi-Fi 30 seconds, then
+    broadcast again if nothing connected."""
+    restore_saved_networks()
+    if connection_mode() == "ap":
+        logger.info("Stopping hotspot to search for saved Wi-Fi")
+        subprocess.run(["systemctl", "stop", "magicboxie-hotspot.service"], check=False)
+        nmcli("connection", "down", "id", "magicboxie-hotspot", timeout=15)
+    nmcli("radio", "wifi", "on")
+    nmcli("device", "wifi", "rescan", "ifname", INTERFACE, timeout=10)
+    finish_search()
 
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     if "--retry" in sys.argv[1:]:
         retry_saved_wifi()
+        return
+    if "--search" in sys.argv[1:]:
+        search()
         return
     restore_saved_networks()
     nmcli("radio", "wifi", "on")

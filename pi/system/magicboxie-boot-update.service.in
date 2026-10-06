@@ -13,6 +13,10 @@ Type=oneshot
 WorkingDirectory=@REPO_DIR@
 ExecStart=/usr/bin/make -C @REPO_DIR@ boot-update
 TimeoutStartSec=60
+# Lowest priority: never slow down resuming the previous movie.
+Nice=19
+CPUSchedulingPolicy=idle
+IOSchedulingClass=idle
 
 [Install]
 WantedBy=multi-user.target

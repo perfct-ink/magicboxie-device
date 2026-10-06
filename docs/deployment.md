@@ -196,6 +196,51 @@ network. To rerun startup selection, use `make pi-wifi-start` or reboot.
 Editing the tracked seed does not replace an existing runtime file. Removing
 an entry from JSON also does not delete its NetworkManager profile.
 
+### Searching for Wi-Fi from settings
+
+The Pi has one Wi-Fi radio, so it cannot broadcast the hotspot and scan for
+networks at once. The web page's settings (gear icon) has **Find Wi-Fi
+networks**, which runs `magicboxie-wifi-search.service`:
+
+1. Stops the hotspot and brings its access point down (clients, including the
+   phone using the page, disconnect).
+2. Rescans and gives saved Wi-Fi up to 30 seconds to connect.
+3. Connected: keeps that connection and queues a self-update.
+4. Not connected: starts the hotspot again; reconnect to **MagicBoxie Player**.
+
+The web service starts the unit with `sudo -n systemctl start --no-block
+magicboxie-wifi-search.service`, allowed by `/etc/sudoers.d/magicboxie`
+(written by the `sudoers` Makefile target, run by `make pi-setup` and
+`make pi-wifi-service`). Until a device has run one of those, the button
+reports that it is not permitted.
+
+## Service overview
+
+| Unit | Type | Role |
+| --- | --- | --- |
+| `magicboxie-wifi-startup` | oneshot, at boot | Restores saved profiles; 30 s for saved Wi-Fi, else starts the hotspot |
+| `magicboxie-hotspot` | long-running | Open AP `MagicBoxie Player` (10.42.0.1) plus dnsmasq for DHCP and captive-portal DNS |
+| `magicboxie-player` | long-running | The daemon: mpv, BLE, web/API, mDNS, transcoding, home-server sync |
+| `magicboxie-boot-update` | oneshot, at boot | Polls for internet up to 30 s at lowest CPU/IO priority, then queues a self-update |
+| `magicboxie-self-update` | oneshot | Pulls, waits for idle, redeploys; started by startup, boot-update and the timer |
+| `magicboxie-self-update.timer` | timer | Daily run, up to 1 h random delay, catches up missed runs |
+| `magicboxie-wifi-search` | oneshot, on demand | Settings-menu Wi-Fi search described above |
+
+Progress text ("Checking for internet…", update phases) travels from the
+update processes to the daemon through small JSON status files
+(`player_app/update_status.py`) and appears as a banner on the idle screen.
+
+## Boot playback
+
+After a reboot the daemon resumes the last movie at its saved position as
+fast as it can. It does not draw the idle screen at startup, since rendering
+it competes for CPU with loading the movie; the idle screen is drawn only
+when nothing is resumed (or a pending update blocks playback). Internet and
+update checks run in parallel in the background: `magicboxie-boot-update`
+tries for the first 30 seconds at idle priority, and never delays playback.
+A pending update installs only when nothing is playing, then the daemon
+restarts and resumes again.
+
 ## Self-update lifecycle
 
 The same `magicboxie-self-update.service` handles the request after saved

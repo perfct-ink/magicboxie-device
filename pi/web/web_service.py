@@ -92,6 +92,7 @@ def create_app(controller: PlaybackController) -> web.Application:
     app.router.add_get("/api/info", _get_info)
     app.router.add_get("/api/logs", _get_logs)
     app.router.add_post("/api/reboot", _post_reboot)
+    app.router.add_post("/api/wifi/search", _post_wifi_search)
     app.router.add_post("/api/shutdown", _post_shutdown)
     app.router.add_post("/api/portal/done", _post_portal_done)
     # Android, Apple, and Windows probe different HTTP paths. An unexpected
@@ -406,6 +407,13 @@ async def _get_logs(request: web.Request) -> web.Response:
 
 async def _post_reboot(request: web.Request) -> web.Response:
     error = await system_info.reboot()
+    if error:
+        return web.json_response({"error": error}, status=500)
+    return web.json_response({"ok": True})
+
+
+async def _post_wifi_search(request: web.Request) -> web.Response:
+    error = await system_info.search_wifi()
     if error:
         return web.json_response({"error": error}, status=500)
     return web.json_response({"ok": True})

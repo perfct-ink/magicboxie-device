@@ -100,6 +100,7 @@ async def _run() -> None:
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, stop_event.set)
 
+    startup_decided = asyncio.Event()
     tasks = []
     workers_done = None
     stopped = None
@@ -111,10 +112,9 @@ async def _run() -> None:
         workers = [
             _run_http(controller, stop_event),
             _run_keyboard(controller, stop_event),
-            _run_status_message(controller, stop_event),
+            _run_status_message(controller, stop_event, startup_decided),
             _run_mdns(stop_event),
-            controller.show_idle_screen(),
-            _run_library_scan(controller, stop_event, prepared=True),
+            _run_library_scan(controller, stop_event, startup_decided, prepared=True),
             _run_playback(controller, stop_event),
             _run_transcode(controller, stop_event),
             _run_idle_dim(controller, stop_event),
@@ -203,16 +203,28 @@ async def _run_mdns(stop_event: asyncio.Event) -> None:
             await advertiser.stop()
 
 
-async def _run_library_scan(controller: PlaybackController, stop_event: asyncio.Event, *, prepared: bool = False) -> None:
-    """Scan without blocking transports, then autoplay unless input arrived."""
-    if not prepared:
-        await run_io(controller.library.scan, fast=True)
-    if stop_event.is_set():
-        return
-    while not stop_event.is_set() and await run_io(read_status) is not None:
-        await sleep_unless_stopped(stop_event, 1)
-    if not stop_event.is_set():
-        await controller.start_random_playback()
+async def _run_library_scan(controller: PlaybackController, stop_event: asyncio.Event,
+                            startup_decided: asyncio.Event, *, prepared: bool = False) -> None:
+    """Scan without blocking transports, then autoplay unless input arrived.
+
+    The idle screen is not drawn at startup: rendering it competes for the
+    weak CPU with the resume of the previous movie, which is what should
+    reach the screen first. It is drawn only once resuming has been ruled out."""
+    try:
+        if not prepared:
+            await run_io(controller.library.scan, fast=True)
+        if stop_event.is_set():
+            return
+        if await run_io(read_status) is not None:
+            await controller.show_idle_screen()
+        while not stop_event.is_set() and await run_io(read_status) is not None:
+            await sleep_unless_stopped(stop_event, 1)
+        if not stop_event.is_set():
+            await controller.start_random_playback()
+    finally:
+        startup_decided.set()
+    if controller.is_idle and not stop_event.is_set():
+        await controller.show_idle_screen()
     # Probes and frame grabs can wait until the user stops playback.
     while not stop_event.is_set():
         if controller.is_idle:
@@ -249,7 +261,8 @@ async def _run_idle_dim(controller: PlaybackController, stop_event: asyncio.Even
     await IdleDimService(controller).run(stop_event)
 
 
-async def _run_status_message(controller: PlaybackController, stop_event: asyncio.Event) -> None:
+async def _run_status_message(controller: PlaybackController, stop_event: asyncio.Event,
+                              startup_decided: asyncio.Event) -> None:
     """Shows what the device is doing (internet/update progress from the
     boot-update and self-update processes, downloads, transcodes) as a big
     banner on the idle screen."""
@@ -257,7 +270,8 @@ async def _run_status_message(controller: PlaybackController, stop_event: asynci
     while not stop_event.is_set():
         controller.status_message = await run_io(read_message)
         message = controller.activity_message
-        if message != shown:
+        # Hold off drawing until startup has decided whether to resume a movie.
+        if message != shown and (startup_decided.is_set() or not controller.is_idle):
             shown = message
             if controller.is_idle:
                 await controller.show_idle_screen()

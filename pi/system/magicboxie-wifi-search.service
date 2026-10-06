@@ -1,0 +1,9 @@
+[Unit]
+Description=MagicBoxie Wi-Fi search (hotspot off for 30 seconds)
+Requires=NetworkManager.service
+After=NetworkManager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/lib/magicboxie/wifi_startup.py --search
+TimeoutStartSec=90

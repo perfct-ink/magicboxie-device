@@ -32,7 +32,7 @@ BOOT_UPDATE_SERVICE_FILE := /etc/systemd/system/$(BOOT_UPDATE_NAME).service
 
 .PHONY: deploy pull install setup seed-movies run test service start stop \
 	restart redeploy wait-until-idle self-update self-update-service logs \
-	uninstall clean wifi-service wifi-start sparse-refresh boot-update repair-checkout
+	uninstall clean wifi-service wifi-start sudoers sparse-refresh boot-update repair-checkout
 
 # --- Raspberry Pi (native, no Docker) -------------------------------------
 # The real device: installs system packages + a venv directly on the Pi and
@@ -94,9 +94,7 @@ setup: sparse-refresh
 	@# Logs stay in RAM: a device that is unplugged often should not write the journal to the SD card.
 	sudo rm -rf /etc/systemd/journald.conf.d/magicboxie.conf /var/log/journal
 	sudo systemctl restart systemd-journald
-	printf '%s ALL=(root) NOPASSWD: /usr/bin/systemctl reboot, /usr/bin/systemctl poweroff\n' "$$(whoami)" | sudo tee /etc/sudoers.d/magicboxie >/dev/null
-	sudo chmod 440 /etc/sudoers.d/magicboxie
-	sudo visudo -cf /etc/sudoers.d/magicboxie >/dev/null || { sudo rm -f /etc/sudoers.d/magicboxie; exit 1; }
+	$(MAKE) sudoers
 	sudo usermod -aG video,input,bluetooth "$$(whoami)"
 	python3 -m venv $(VENV)
 	$(VENV)/bin/pip install --upgrade pip
@@ -180,6 +178,8 @@ wifi-service:
 	sudo install -m 644 system/magicboxie-wifi-startup.service /etc/systemd/system/magicboxie-wifi-startup.service
 	sudo install -m 644 system/magicboxie-wifi-retry.service /etc/systemd/system/magicboxie-wifi-retry.service
 	sudo install -m 644 system/magicboxie-wifi-retry.timer /etc/systemd/system/magicboxie-wifi-retry.timer
+	sudo install -m 644 system/magicboxie-wifi-search.service /etc/systemd/system/magicboxie-wifi-search.service
+	$(MAKE) sudoers
 	sudo systemctl disable magicboxie-hotspot
 	sudo systemctl daemon-reload
 	sudo systemctl enable magicboxie-wifi-startup
@@ -286,6 +286,12 @@ self-update:
 		python3 -c 'import sys; from pathlib import Path; from player_app.storage import atomic_write; atomic_write(Path(sys.argv[2]) / "magicboxie-installed-revision", sys.argv[1].encode())' "$$after" "$$(git rev-parse --git-dir)"; \
 	fi
 
+# Lets the web service user reboot/power off and start the Wi-Fi search, and nothing else.
+sudoers:
+	printf '%s ALL=(root) NOPASSWD: /usr/bin/systemctl reboot, /usr/bin/systemctl poweroff, /usr/bin/systemctl start --no-block magicboxie-wifi-search.service\n' "$$(whoami)" | sudo tee /etc/sudoers.d/magicboxie >/dev/null
+	sudo chmod 440 /etc/sudoers.d/magicboxie
+	sudo visudo -cf /etc/sudoers.d/magicboxie >/dev/null || { sudo rm -f /etc/sudoers.d/magicboxie; exit 1; }
+
 # Renders and enables magicboxie-self-update's service+timer (daily git
 # pull, see self-update above) - part of install/pi so auto-update is
 # on by default rather than a separate opt-in step. Only the .service has
@@ -327,7 +333,7 @@ uninstall:
 	sudo systemctl disable --now magicboxie-wifi-retry.timer 2>/dev/null || true
 	sudo rm -f /etc/systemd/system/magicboxie-wifi-retry.service /etc/systemd/system/magicboxie-wifi-retry.timer
 	sudo systemctl disable --now magicboxie-wifi-startup 2>/dev/null || true
-	sudo rm -f /etc/systemd/system/magicboxie-wifi-startup.service /usr/local/lib/magicboxie/wifi_startup.py
+	sudo rm -f /etc/systemd/system/magicboxie-wifi-startup.service /etc/systemd/system/magicboxie-wifi-search.service /usr/local/lib/magicboxie/wifi_startup.py
 	sudo systemctl disable --now magicboxie-hotspot 2>/dev/null || true
 	sudo nmcli connection delete magicboxie-hotspot 2>/dev/null || true
 	sudo rm -f /etc/systemd/system/magicboxie-hotspot.service /etc/magicboxie-hotspot-dnsmasq.conf

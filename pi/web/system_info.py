@@ -91,13 +91,18 @@ def disk_gb(path) -> Optional[dict]:
     return {"total": round(usage.total / gb, 1), "free": round(usage.free / gb, 1)}
 
 
+def app_version() -> Optional[str]:
+    """Release number from pi/VERSION, the one place it is maintained (pyproject reads it too)."""
+    return _read(str(Path(__file__).resolve().parents[1] / "VERSION")) or None
+
+
 def software_revision() -> Optional[dict]:
-    output = _run("git", "-C", str(REPO_DIR), "log", "-1", "--format=%h%x09%s%x09%cs")
+    output = _run("git", "-c", "safe.directory=*", "-C", str(REPO_DIR), "log", "-1", "--format=%h%x09%s%x09%cs")
     if not output:
         return None
     commit, _, rest = output.partition("\t")
     subject, _, date = rest.partition("\t")
-    return {"commit": commit, "subject": subject, "date": date}
+    return {"commit": commit, "subject": subject, "date": date, "version": app_version()}
 
 
 def snapshot(movies_root) -> dict:
@@ -223,3 +228,17 @@ async def reboot() -> Optional[str]:
 
 async def shutdown() -> Optional[str]:
     return await _systemctl_power("poweroff")
+
+
+async def search_wifi() -> Optional[str]:
+    """Starts the Wi-Fi search unit (hotspot off for 30 seconds, then back on
+    if no saved network connected). Returns an error message if it could not start."""
+    try:
+        process = await asyncio.create_subprocess_exec(
+            "sudo", "-n", "/usr/bin/systemctl", "start", "--no-block", "magicboxie-wifi-search.service",
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+        )
+        code = await asyncio.wait_for(process.wait(), timeout=5)
+    except (OSError, asyncio.TimeoutError) as exc:
+        return f"could not start the Wi-Fi search: {exc}"
+    return None if code == 0 else "the device is not permitted to search for Wi-Fi (run make wifi-service)"

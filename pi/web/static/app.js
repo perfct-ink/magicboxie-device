@@ -180,7 +180,8 @@ function renderSettings(info) {
       ['Keyboard', info.keyboards && info.keyboards.length ? info.keyboards.join(', ') : 'None detected'],
     ]),
     section('Software', [
-      ['Version', info.software ? info.software.commit + ' · ' + info.software.date : null],
+      ['Version', info.software ? (info.software.version ? info.software.version + ' · ' : '') + info.software.commit : 'Unknown'],
+      ['Latest change date', info.software ? info.software.date : 'Unknown'],
       ['Latest change', info.software && info.software.subject], ['API version', info.api_version],
     ]),
   );
@@ -204,6 +205,14 @@ function openSettings() {
       note.textContent = 'Rebooting… this page reconnects when the device is back.';
     } catch (error) {note.textContent = error.message;}
   });
+  const search = document.createElement('button'); search.className = 'btn grey'; search.textContent = 'Find Wi-Fi networks';
+  search.addEventListener('click', async () => {
+    if (!confirm('Search for saved Wi-Fi networks for 30 seconds? The MagicBoxie Player hotspot turns off meanwhile, so this page disconnects. If no network is found the hotspot comes back - reconnect to it then.')) return;
+    try {
+      await api('/api/wifi/search', {method:'POST'});
+      note.textContent = 'Searching for networks for 30 seconds… the hotspot is off. It returns if none is found.';
+    } catch (error) {note.textContent = error.message;}
+  });
   const shutdown = document.createElement('button'); shutdown.className = 'btn danger'; shutdown.textContent = 'Shut down';
   shutdown.addEventListener('click', async () => {
     if (!confirm('Shut down the device? It stays off until it is unplugged and plugged back in.')) return;
@@ -216,7 +225,7 @@ function openSettings() {
   logsButton.addEventListener('click', openLogs);
   const close = document.createElement('button'); close.className = 'btn grey'; close.textContent = 'Close';
   close.addEventListener('click', closeSheet);
-  row.append(logsButton, reboot, shutdown, close); body.append(h, details, note, row); panel.append(body);
+  row.append(logsButton, search, reboot, shutdown, close); body.append(h, details, note, row); panel.append(body);
   $('sheet').classList.remove('hidden');
   refreshSettings(); clearInterval(settingsTimer); settingsTimer = setInterval(() => {if (!document.hidden) refreshSettings();}, 5000);
 }

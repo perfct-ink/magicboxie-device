@@ -805,3 +805,17 @@ def test_status_tells_the_page_how_often_to_poll():
 
     assert asyncio.run(scenario(None)) == 3      # idle
     assert asyncio.run(scenario(1)) == 10        # transcoding: back off
+
+
+def test_wifi_search_reports_success_and_failure():
+    async def scenario(error):
+        client, _ = await _make_client()
+        try:
+            with patch("web.web_service.system_info.search_wifi", new=AsyncMock(return_value=error)):
+                response = await client.post("/api/wifi/search")
+                return response.status, await response.json()
+        finally:
+            await client.close()
+
+    assert asyncio.run(scenario(None)) == (200, {"ok": True})
+    assert asyncio.run(scenario("nope"))[0] == 500
