@@ -205,6 +205,25 @@ function openSettings() {
       note.textContent = 'Rebooting… this page reconnects when the device is back.';
     } catch (error) {note.textContent = error.message;}
   });
+  const wifi = document.createElement('div'); wifi.className = 'info';
+  const wh = document.createElement('h4'); wh.textContent = 'Saved Wi-Fi networks';
+  const saved = document.createElement('p'); saved.className = 'meta'; saved.textContent = 'Loading…';
+  const ssid = document.createElement('input'); ssid.placeholder = 'Network name (e.g. your iPhone)'; ssid.autocapitalize = 'off'; ssid.autocomplete = 'off';
+  const pass = document.createElement('input'); pass.type = 'password'; pass.placeholder = 'Password (blank for an open network)'; pass.autocomplete = 'off';
+  const add = document.createElement('button'); add.className = 'btn grey small'; add.textContent = 'Save network';
+  const loadSaved = async () => {
+    try {const r = await api('/api/wifi/networks'); saved.textContent = r.networks.length ? r.networks.join(', ') : 'None saved';}
+    catch (error) {saved.textContent = error.message;}
+  };
+  add.addEventListener('click', async () => {
+    if (!ssid.value) {note.textContent = 'Enter the network name.'; return;}
+    try {
+      await api('/api/wifi/networks', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ssid: ssid.value, password: pass.value})});
+      note.textContent = 'Saved. Turn that network on, then tap Find Wi-Fi networks.';
+      ssid.value = ''; pass.value = ''; loadSaved();
+    } catch (error) {note.textContent = error.message;}
+  });
+  wifi.append(wh, saved, ssid, pass, add); loadSaved();
   const search = document.createElement('button'); search.className = 'btn grey'; search.textContent = 'Find Wi-Fi networks';
   search.addEventListener('click', async () => {
     if (!confirm('Search for saved Wi-Fi networks for 30 seconds? The MagicBoxie Player hotspot turns off meanwhile, so this page disconnects. If no network is found the hotspot comes back - reconnect to it then.')) return;
@@ -225,7 +244,7 @@ function openSettings() {
   logsButton.addEventListener('click', openLogs);
   const close = document.createElement('button'); close.className = 'btn grey'; close.textContent = 'Close';
   close.addEventListener('click', closeSheet);
-  row.append(logsButton, search, reboot, shutdown, close); body.append(h, details, note, row); panel.append(body);
+  row.append(logsButton, search, reboot, shutdown, close); body.append(h, details, wifi, note, row); panel.append(body);
   $('sheet').classList.remove('hidden');
   refreshSettings(); clearInterval(settingsTimer); settingsTimer = setInterval(() => {if (!document.hidden) refreshSettings();}, 5000);
 }

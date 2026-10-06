@@ -18,6 +18,7 @@ from aiohttp import web
 from . import system_info
 from .portal import PAGE, STATIC_DIR, WELCOME_PAGE, WELCOME_URL
 from player_app.storage import publish_file, run_io
+from player_app.wifi_networks import load_networks, save_network
 from player_app.controllers.playback_controller import PlaybackController
 from player_app.models.library import VIDEO_EXTENSIONS
 from player_app.models.protocol import API_VERSION, Command, Movie, Opcode
@@ -93,6 +94,8 @@ def create_app(controller: PlaybackController) -> web.Application:
     app.router.add_get("/api/logs", _get_logs)
     app.router.add_post("/api/reboot", _post_reboot)
     app.router.add_post("/api/wifi/search", _post_wifi_search)
+    app.router.add_get("/api/wifi/networks", _get_wifi_networks)
+    app.router.add_post("/api/wifi/networks", _post_wifi_network)
     app.router.add_post("/api/shutdown", _post_shutdown)
     app.router.add_post("/api/portal/done", _post_portal_done)
     # Android, Apple, and Windows probe different HTTP paths. An unexpected
@@ -409,6 +412,29 @@ async def _post_reboot(request: web.Request) -> web.Response:
     error = await system_info.reboot()
     if error:
         return web.json_response({"error": error}, status=500)
+    return web.json_response({"ok": True})
+
+
+async def _get_wifi_networks(request: web.Request) -> web.Response:
+    """Saved network names only - never the passwords."""
+    try:
+        networks = await run_io(load_networks)
+    except (OSError, ValueError):
+        return web.json_response({"error": "cannot read saved Wi-Fi networks"}, status=500)
+    return web.json_response({"networks": [network["ssid"] for network in networks]})
+
+
+async def _post_wifi_network(request: web.Request) -> web.Response:
+    """Saves a network for later: it is joined by startup or the Wi-Fi search,
+    not now, so the hotspot this page is using stays up."""
+    try:
+        payload = await request.json()
+        ssid, password = payload["ssid"], payload.get("password", "")
+        await run_io(save_network, ssid, password)
+    except (ValueError, KeyError, TypeError):
+        return web.json_response({"error": "enter a network name (1-32 bytes) and a password"}, status=400)
+    except OSError:
+        return web.json_response({"error": "could not save the network"}, status=500)
     return web.json_response({"ok": True})
 
 

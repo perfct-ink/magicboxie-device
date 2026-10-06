@@ -819,3 +819,23 @@ def test_wifi_search_reports_success_and_failure():
 
     assert asyncio.run(scenario(None)) == (200, {"ok": True})
     assert asyncio.run(scenario("nope"))[0] == 500
+
+
+def test_wifi_networks_can_be_saved_and_listed_without_passwords(tmp_path):
+    path = tmp_path / "wifi.json"
+
+    async def scenario():
+        client, _ = await _make_client()
+        try:
+            with patch("web.web_service.load_networks", side_effect=lambda: load_networks(path)), \
+                    patch("web.web_service.save_network", side_effect=lambda s, p: save_network(s, p, path)):
+                bad = await client.post("/api/wifi/networks", json={"ssid": "", "password": "x"})
+                missing = await client.post("/api/wifi/networks", json={"password": "x"})
+                ok = await client.post("/api/wifi/networks", json={"ssid": "My iPhone", "password": "secret"})
+                listed = await (await client.get("/api/wifi/networks")).json()
+                return bad.status, missing.status, ok.status, listed
+        finally:
+            await client.close()
+
+    from player_app.wifi_networks import load_networks, save_network
+    assert asyncio.run(scenario()) == (400, 400, 200, {"networks": ["My iPhone"]})

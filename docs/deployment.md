@@ -208,6 +208,13 @@ networks**, which runs `magicboxie-wifi-search.service`:
 3. Connected: keeps that connection and queues a self-update.
 4. Not connected: starts the hotspot again; reconnect to **MagicBoxie Player**.
 
+To add a network without BLE or SSH (for example an iPhone Personal Hotspot),
+use **Saved Wi-Fi networks** in the same settings sheet: enter the name and
+password and tap **Save network**. This only saves it (the page stays
+connected to the hotspot); the saved network is joined at the next boot or by
+**Find Wi-Fi networks**. Saved names are listed, passwords never are
+(`GET/POST /api/wifi/networks`).
+
 The web service starts the unit with `sudo -n systemctl start --no-block
 magicboxie-wifi-search.service`, allowed by `/etc/sudoers.d/magicboxie`
 (written by the `sudoers` Makefile target, run by `make pi-setup` and
