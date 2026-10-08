@@ -95,8 +95,6 @@ class PlaybackController:
     @property
     def update_status(self) -> Optional[str]:
         phase = self._software_update_phase
-        if phase == "waiting":
-            return "Update ready — waiting for movie to finish"
         if phase == "installing":
             return "Updating device software"
         if self.currently_syncing_movie_title:
@@ -221,6 +219,23 @@ class PlaybackController:
         await self.player.set_dim(0)
         await self._show_idle_screen_locked()
 
+    async def _stop_for_update(self) -> None:
+        """An update is installing: stop the movie so the install has the CPU
+        and the restart is clean. The saved playback state is kept, with the
+        exact position, so the restarted player carries on where it left off."""
+        movie_id = self._current_movie_id
+        if not (self.player.finished or self.player.failed or self.player.loading):
+            position = await self.player.get_position()
+            paused = await self.player.get_paused()
+            self._last_checkpoint_at = None
+            await run_io(self._save_playback_state, movie_id, position, paused)
+        await self._remember_position()
+        await self.player.stop()
+        self._current_movie_id = None
+        await self.player.hide_pause_icon()
+        await self.player.set_dim(0)
+        await self._show_idle_screen_locked()
+
     async def start_random_playback(self) -> None:
         """Start once the library is ready, unless startup input took priority.
         Continues whatever was playing before the device last stopped (power
@@ -265,6 +280,10 @@ class PlaybackController:
         # None (below, or in stop_and_show_idle_screen), so there's nothing
         # left to do here.
         if self._current_movie_id is None:
+            return PlaybackState.idle()
+
+        if self._software_update_phase == "installing":
+            await self._stop_for_update()
             return PlaybackState.idle()
 
         if self.player.failed:

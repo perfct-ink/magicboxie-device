@@ -18,9 +18,7 @@ HOME_SERVER_ENV := /var/lib/magicboxie/home-server.env
 # this repo happens to be checked out, unlike MOVIES_DIR above (which is
 # Docker-dev-only, relative to the repo, and unrelated to the real device).
 CONTENT_DIR := /content
-# Matches MAGICBOXIE_HTTP_PORT's own default (see main.py) - only used here
-# to poll the device's own /api/status from wait-until-idle below, so
-# override this too if you've overridden that.
+# Matches MAGICBOXIE_HTTP_PORT's own default (see main.py).
 HTTP_PORT := 8000
 SERVICE_NAME := magicboxie-player
 SERVICE_FILE := /etc/systemd/system/$(SERVICE_NAME).service
@@ -31,7 +29,7 @@ BOOT_UPDATE_NAME := magicboxie-boot-update
 BOOT_UPDATE_SERVICE_FILE := /etc/systemd/system/$(BOOT_UPDATE_NAME).service
 
 .PHONY: deploy pull install setup seed-movies run test service start stop \
-	restart redeploy wait-until-idle self-update self-update-service logs \
+	restart redeploy self-update self-update-service logs \
 	uninstall clean wifi-service wifi-start sudoers sparse-refresh boot-update repair-checkout
 
 # --- Raspberry Pi (native, no Docker) -------------------------------------
@@ -210,24 +208,6 @@ redeploy: sparse-refresh service wifi-service
 	sudo systemctl restart $(SERVICE_NAME)
 	$(MAKE) wifi-start
 
-# Blocks until nothing's selected to play (PlaybackStatus.STOPPED, reported
-# as "stopped" by /api/status - see playback_controller.py's refresh_status
-# and web_service.py's _get_status), so self-update's restart never cuts
-# off a movie mid-playback. Polls the local HTTP API rather than the BLE
-# characteristic since that's always running regardless of
-# MAGICBOXIE_TRANSPORT (see main.py's _run()) and trivial to curl. No
-# timeout: if something's playing back-to-back for hours, the update just
-# waits for the next natural gap - the alternative (forcing it) is exactly
-# the interruption this exists to avoid. A dead/unreachable HTTP API (server
-# still starting up, one bad poll) reads as "" here, which never matches
-# "stopped", so it just keeps polling rather than mistaking that for idle.
-wait-until-idle:
-	@status=""; \
-	while [ "$$status" != "stopped" ]; do \
-		sleep 30; \
-		status="$$(curl -s --max-time 5 http://localhost:$(HTTP_PORT)/api/status | python3 -c 'import json,sys; print(json.load(sys.stdin).get("status", ""))' 2>/dev/null)"; \
-	done
-
 # Power loss mid-pull or mid-checkout can leave a stale index.lock, empty git
 # objects, or half-written tracked files. A device checkout (sparse, from
 # install.sh) is deployment-only - changes arrive through git - so restore its
@@ -254,9 +234,9 @@ repair-checkout:
 # in new commits - startup after saved Wi-Fi connects and the daily
 # magicboxie-self-update.timer both run this, so a check with nothing new to
 # install never interrupts whatever's playing with a pointless restart.
-# Waits for playback to be idle (wait-until-idle above) before
-# redeploying, so even a real update never cuts off a movie already in
-# progress. --ff-only rather than pull's plain `git pull`: this runs
+# Installs as soon as it finds new code: the player stops any movie while the
+# update installs and resumes it at the same position after the restart.
+# --ff-only rather than pull's plain `git pull`: this runs
 # unattended, so a diverged history should fail cleanly instead of
 # attempting a merge with no one around to resolve it. Skips the pull
 # entirely if the working tree has local changes (shouldn't happen on a
@@ -282,11 +262,8 @@ self-update:
 		echo "self-update: already up to date"; \
 		python3 -m player_app.update_status current $$$$; \
 	else \
-		echo "self-update: $$before -> $$after, waiting for playback to be idle before redeploying"; \
-		python3 -m player_app.update_status waiting $$$$; \
+		echo "self-update: $$before -> $$after, installing now (any movie is stopped and resumes after the restart)"; \
 		trap 'python3 -m player_app.update_status clear $$$$' EXIT HUP INT TERM; \
-		$(MAKE) wait-until-idle || exit $$?; \
-		echo "self-update: idle now, redeploying"; \
 		python3 -m player_app.update_status installing $$$$; \
 		sleep 2; \
 		$(MAKE) redeploy || exit $$?; \

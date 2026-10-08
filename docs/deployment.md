@@ -229,7 +229,7 @@ reports that it is not permitted.
 | `magicboxie-hotspot` | long-running | Open AP `MagicBoxie Player` (10.42.0.1) plus dnsmasq for DHCP and captive-portal DNS |
 | `magicboxie-player` | long-running | The daemon: mpv, BLE, web/API, mDNS, transcoding, home-server sync |
 | `magicboxie-boot-update` | oneshot, at boot | Polls for internet up to 30 s at lowest CPU/IO priority, then queues a self-update |
-| `magicboxie-self-update` | oneshot | Pulls, waits for idle, redeploys; started by startup, boot-update and the timer |
+| `magicboxie-self-update` | oneshot | Pulls and, if there is new code, installs it at once; started by startup, boot-update and the timer |
 | `magicboxie-self-update.timer` | timer | Daily run, up to 1 h random delay, catches up missed runs |
 | `magicboxie-wifi-search` | oneshot, on demand | Settings-menu Wi-Fi search described above |
 
@@ -245,8 +245,8 @@ it competes for CPU with loading the movie; the idle screen is drawn only
 when nothing is resumed (or a pending update blocks playback). Internet and
 update checks run in parallel in the background: `magicboxie-boot-update`
 tries for the first 30 seconds at idle priority, and never delays playback.
-A pending update installs only when nothing is playing, then the daemon
-restarts and resumes again.
+An update installs as soon as it is found: the daemon stops the movie, the
+install runs, and the restarted daemon resumes the movie at the same position.
 
 ## Escape on the device keyboard
 
@@ -290,13 +290,14 @@ The updater:
 3. Compares Git HEAD with `.git/magicboxie-installed-revision`. A missing or
    different marker requires installation, including retrying an interrupted
    deployment even if no new commits were pulled this time.
-4. Publishes update status and waits until `/api/status` reports `stopped`.
-   Polling occurs every 30 seconds. An unreachable API is not treated as idle.
+4. Publishes the `installing` status. The daemon sees it, saves the exact
+   playback position, stops the movie and shows "Updating device software" on
+   the idle screen, so the install has the CPU to itself.
 5. Redeploys, restarts the daemon, and records the successfully installed
    revision. It clears the live update status when the updater exits.
 
-The idle wait has no application timeout. A playing movie can delay
-installation. Hotspot fallback does not request a startup update; the daily
+There is no wait for playback to end: an update interrupts the movie, and the
+restarted daemon resumes it where it stopped. Hotspot fallback does not request a startup update; the daily
 timer remains enabled. Already running update requests use the same systemd
 unit rather than launching parallel updater processes.
 

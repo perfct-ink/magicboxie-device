@@ -114,7 +114,8 @@ profile; also delete that profile if you want to forget the network.
 
 Once startup connects to saved Wi-Fi, it immediately requests the existing
 self-update service. The update runs in the background, pulls the latest code,
-and waits for playback to be idle before installing changes. A failed update
+and installs any changes right away (a playing movie is stopped and resumes
+at the same position after the restart). A failed update
 or a network without internet leaves the Wi-Fi connection intact. The daily
 update timer remains enabled for later retries. Hotspot fallback does not
 request an update.

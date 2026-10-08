@@ -478,15 +478,19 @@ def test_corrupt_positions_are_ignored(tmp_path):
     asyncio.run(scenario())
 
 
-def test_update_waits_for_movie_end(monkeypatch):
+def test_installing_update_stops_the_movie_but_keeps_it_to_resume(tmp_path, monkeypatch):
     async def scenario():
         player = FakeMpv()
-        controller = PlaybackController(FakeLibrary(), player)
+        state_path = tmp_path / "state.json"
+        controller = PlaybackController(FakeLibrary(), player, state_path)
         await controller.handle_command(Command(Opcode.SELECT_MOVIE, 0))
-        monkeypatch.setattr("player_app.controllers.playback_controller.read_status", lambda: "waiting")
-        assert (await controller.refresh_status()).movie_id == 0
-        player.finished = True
+        player.position = 123
+        monkeypatch.setattr("player_app.controllers.playback_controller.read_status", lambda: "installing")
         assert (await controller.refresh_status()).status == PlaybackStatus.STOPPED
+        assert controller.is_idle
+        assert json.loads(state_path.read_text())["position_seconds"] == 123
+        restarted = PlaybackController(FakeLibrary(), FakeMpv(), state_path)
+        assert await restarted.restore_last_playback()
     asyncio.run(scenario())
 
 

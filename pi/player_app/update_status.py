@@ -23,7 +23,6 @@ MESSAGES = {
     "no_internet": "No internet \u2014 continuing without updating",
     "checking": "Checking for updates\u2026",
     "current": "Software is up to date",
-    "waiting": "Update ready \u2014 waiting for movie to finish",
     "installing": "Updating device software",
 }
 TRANSIENT = ("no_internet", "current")
@@ -65,7 +64,7 @@ def read_message():
 def read_status():
     data = read_dict(STATUS_PATH)
     try:
-        if data.get("phase") not in ("waiting", "installing"):
+        if data.get("phase") not in ("installing",):
             return None
         if not 0 <= time.time() - data["at"] < 86400:
             return None
