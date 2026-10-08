@@ -339,6 +339,17 @@ class PlaybackController:
             except OSError:
                 logger.warning("Could not save movie positions")
 
+    async def save_position_now(self) -> None:
+        """Writes the current movie's exact position and resume state, for a
+        shutdown or restart (otherwise it could be up to a checkpoint stale)."""
+        movie_id = self._current_movie_id
+        if movie_id is None or self.player.finished or self.player.failed or self.player.loading:
+            return
+        position = await self.player.get_position()
+        paused = await self.player.get_paused()
+        self._last_checkpoint_at = None
+        await run_io(self._save_playback_state, movie_id, position, paused)
+
     async def _remember_position(self) -> None:
         if self._current_movie_id is not None and not self.player.finished and not self.player.failed and not self.player.loading:
             position = await self.player.get_position()

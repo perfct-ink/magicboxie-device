@@ -538,3 +538,22 @@ def test_periodic_saves_every_five_seconds_with_live_status(tmp_path):
             await controller.handle_command(Command(Opcode.STOP))
             assert json.loads((tmp_path / "movie_positions.json").read_text())["0"] == 16
     asyncio.run(scenario())
+
+
+def test_save_position_now_writes_the_exact_position_for_every_movie(tmp_path):
+    state_path = tmp_path / "playback_state.json"
+    player = FakeMpv()
+
+    async def scenario():
+        controller = PlaybackController(FakeLibrary(), player, state_path=state_path)
+        await controller.handle_command(Command(opcode=Opcode.SELECT_MOVIE, argument=0))
+        player.position = 30
+        await controller.handle_command(Command(opcode=Opcode.SELECT_MOVIE, argument=1))
+        player.position = 55
+        await controller.save_position_now()
+        return controller
+
+    controller = asyncio.run(scenario())
+    positions = json.loads((tmp_path / "movie_positions.json").read_text())
+    assert positions == {"0": 30, "1": 55}
+    assert json.loads(state_path.read_text())["position_seconds"] == 55

@@ -109,6 +109,7 @@ async def _run() -> None:
         loop.add_signal_handler(sig, stop_event.set)
 
     startup_decided = asyncio.Event()
+    controller = None
     tasks = []
     workers_done = None
     stopped = None
@@ -147,6 +148,11 @@ async def _run() -> None:
         if stopped is not None:
             stopped.cancel()
             await asyncio.gather(stopped, return_exceptions=True)
+        if controller is not None:
+            try:
+                await asyncio.wait_for(controller.save_position_now(), timeout=2)
+            except Exception:
+                logger.warning("Could not save the playback position on exit")
         await player.stop_process()
 
 
