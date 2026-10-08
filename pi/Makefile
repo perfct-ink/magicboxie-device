@@ -85,7 +85,7 @@ setup: sparse-refresh
 		mpv ffmpeg libjpeg-dev zlib1g-dev \
 		fonts-dejavu-core \
 		bluez dbus \
-		curl network-manager dnsmasq-base avahi-daemon
+		curl network-manager dnsmasq-base iw avahi-daemon
 	@if [ "$$(hostname)" != "magicboxie-player" ]; then \
 		echo "Setting hostname to magicboxie-player (reachable as magicboxie-player.local via Avahi)..."; \
 		sudo hostnamectl set-hostname magicboxie-player; \
@@ -176,9 +176,12 @@ wifi-service:
 	sudo install -d -m 755 /usr/local/lib/magicboxie
 	sudo install -m 644 player_app/wifi_startup.py player_app/wifi_networks.py player_app/storage.py /usr/local/lib/magicboxie/
 	sudo install -m 644 system/magicboxie-wifi-startup.service /etc/systemd/system/magicboxie-wifi-startup.service
+	sudo install -m 644 system/magicboxie-wifi-retry.service /etc/systemd/system/magicboxie-wifi-retry.service
+	sudo install -m 644 system/magicboxie-wifi-retry.timer /etc/systemd/system/magicboxie-wifi-retry.timer
 	sudo systemctl disable magicboxie-hotspot
 	sudo systemctl daemon-reload
 	sudo systemctl enable magicboxie-wifi-startup
+	sudo systemctl enable --now magicboxie-wifi-retry.timer
 
 wifi-start:
 	@echo 'Trying saved Wi-Fi; MagicBoxie Player hotspot starts if none connects within 30 seconds.'
@@ -319,6 +322,8 @@ logs:
 	journalctl -u $(SERVICE_NAME) -f
 
 uninstall:
+	sudo systemctl disable --now magicboxie-wifi-retry.timer 2>/dev/null || true
+	sudo rm -f /etc/systemd/system/magicboxie-wifi-retry.service /etc/systemd/system/magicboxie-wifi-retry.timer
 	sudo systemctl disable --now magicboxie-wifi-startup 2>/dev/null || true
 	sudo rm -f /etc/systemd/system/magicboxie-wifi-startup.service /usr/local/lib/magicboxie/wifi_startup.py
 	sudo systemctl disable --now magicboxie-hotspot 2>/dev/null || true

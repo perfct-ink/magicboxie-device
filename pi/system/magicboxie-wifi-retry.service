@@ -1,0 +1,9 @@
+[Unit]
+Description=MagicBoxie: leave an idle fallback hotspot for saved Wi-Fi when possible
+Requires=NetworkManager.service
+After=NetworkManager.service magicboxie-wifi-startup.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/lib/magicboxie/wifi_startup.py --retry
+TimeoutStartSec=90

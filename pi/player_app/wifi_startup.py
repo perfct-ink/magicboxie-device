@@ -1,5 +1,10 @@
 """Give NetworkManager 30 seconds to join saved Wi-Fi before starting the AP.
 
+With --retry (run periodically by magicboxie-wifi-retry.timer), a device
+stuck on its fallback hotspot with nobody connected to it drops the hotspot
+for one more 30-second saved-Wi-Fi window, so it returns to a saved network
+such as Mitera once it is back in range instead of waiting for a reboot.
+
 Installed as a root-owned standalone script; only Python's standard library
 is needed. NetworkManager scans and authenticates using its saved profiles.
 """
@@ -8,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import subprocess
+import sys
 import time
 
 if __package__:
@@ -98,8 +104,45 @@ def request_self_update() -> None:
         logger.warning("Could not request self-update; keeping saved Wi-Fi connected")
 
 
+def hotspot_has_clients() -> bool:
+    """Anyone joined to the hotspot (e.g. on the setup page) keeps it up.
+    If iw cannot answer, assume someone is there rather than cut them off."""
+    try:
+        result = subprocess.run(
+            ["iw", "dev", INTERFACE, "station", "dump"],
+            capture_output=True, text=True, timeout=5, check=True,
+        )
+    except (subprocess.SubprocessError, OSError):
+        logger.warning("Cannot list hotspot clients; keeping the hotspot up")
+        return True
+    return "Station" in result.stdout
+
+
+def start_hotspot() -> None:
+    logger.info("Starting MagicBoxie Player hotspot")
+    subprocess.run(["systemctl", "start", "magicboxie-hotspot.service"], check=True)
+
+
+def retry_saved_wifi() -> None:
+    if connection_mode() != "ap":
+        return
+    if hotspot_has_clients():
+        logger.info("Hotspot has clients; not retrying saved Wi-Fi now")
+        return
+    logger.info("Hotspot is idle; retrying saved Wi-Fi for up to %d seconds", STARTUP_WAIT_SECONDS)
+    subprocess.run(["systemctl", "stop", "magicboxie-hotspot.service"], check=False)
+    nmcli("connection", "down", "id", "magicboxie-hotspot", timeout=15)
+    if wait_for_saved_wifi():
+        request_self_update()
+    else:
+        start_hotspot()
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    if "--retry" in sys.argv[1:]:
+        retry_saved_wifi()
+        return
     restore_saved_networks()
     nmcli("radio", "wifi", "on")
     nmcli("device", "set", INTERFACE, "autoconnect", "yes")
@@ -107,8 +150,7 @@ def main() -> None:
     if wait_for_saved_wifi():
         request_self_update()
     else:
-        logger.info("Starting MagicBoxie Player hotspot")
-        subprocess.run(["systemctl", "start", "magicboxie-hotspot.service"], check=True)
+        start_hotspot()
 
 
 if __name__ == "__main__":

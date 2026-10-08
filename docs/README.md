@@ -104,9 +104,13 @@ existing Wi-Fi connection or active hotspot stays connected. If fallback
 activates, connect to **MagicBoxie Player**, then SSH to `10.42.0.1` with your
 existing Pi account. Use Ethernet or a second Wi-Fi adapter for internet
 access while broadcasting. BLE provisioning can switch the built-in adapter
-to a supplied network. The startup decision is made once, without repeatedly
-switching networks while someone is using the device; reboot or run
-`make pi-wifi-start` to try the startup policy again.
+to a supplied network. While the hotspot is up, a timer checks every five
+minutes: if nobody is connected to the hotspot, it turns the hotspot off for
+another 30-second saved-Wi-Fi window, so the device returns to a saved network
+such as Mitera once it is back in range (and requests an update, as at
+startup). If no saved network connects, the hotspot comes back. Anyone
+connected to the hotspot keeps it up. Reboot or run `make pi-wifi-start` to
+try the startup policy immediately.
 
 Anyone in Wi-Fi range can join and use the device's unauthenticated controls
 and API, including uploads and deletions. Use this mode where that access is

@@ -1,0 +1,11 @@
+# Every five minutes, a device on its fallback hotspot with no clients tries
+# saved Wi-Fi again (see wifi_startup.py --retry). Does nothing on saved Wi-Fi.
+[Unit]
+Description=Retry saved Wi-Fi while the MagicBoxie hotspot is idle
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target

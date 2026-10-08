@@ -98,3 +98,58 @@ def test_existing_hotspot_does_not_request_update():
             patch.object(wifi_startup.subprocess, "run") as run:
         wifi_startup.main()
     run.assert_called_once_with(["systemctl", "start", "magicboxie-hotspot.service"], check=True)
+
+
+def test_retry_does_nothing_when_not_on_hotspot():
+    with patch.object(wifi_startup, "connection_mode", return_value="infrastructure"), \
+            patch.object(wifi_startup.subprocess, "run") as run:
+        wifi_startup.retry_saved_wifi()
+    run.assert_not_called()
+
+
+def test_retry_keeps_hotspot_up_while_clients_are_connected():
+    station = wifi_startup.subprocess.CompletedProcess([], 0, stdout="Station aa:bb:cc:dd:ee:ff (on wlan0)\n")
+    with patch.object(wifi_startup, "connection_mode", return_value="ap"), \
+            patch.object(wifi_startup, "nmcli") as nmcli, \
+            patch.object(wifi_startup.subprocess, "run", return_value=station) as run:
+        wifi_startup.retry_saved_wifi()
+    assert run.call_count == 1
+    nmcli.assert_not_called()
+
+
+def test_retry_assumes_clients_when_iw_is_unavailable():
+    with patch.object(wifi_startup.subprocess, "run", side_effect=OSError("no iw")):
+        assert wifi_startup.hotspot_has_clients()
+
+
+def test_idle_hotspot_switches_to_saved_wifi_and_requests_update():
+    with patch.object(wifi_startup, "connection_mode", return_value="ap"), \
+            patch.object(wifi_startup, "hotspot_has_clients", return_value=False), \
+            patch.object(wifi_startup, "wait_for_saved_wifi", return_value=True), \
+            patch.object(wifi_startup, "nmcli") as nmcli, \
+            patch.object(wifi_startup.subprocess, "run") as run:
+        wifi_startup.retry_saved_wifi()
+    nmcli.assert_called_once_with("connection", "down", "id", "magicboxie-hotspot", timeout=15)
+    assert [c.args[0] for c in run.call_args_list] == [
+        ["systemctl", "stop", "magicboxie-hotspot.service"],
+        ["systemctl", "--no-block", "start", "magicboxie-self-update.service"],
+    ]
+
+
+def test_idle_hotspot_comes_back_when_no_saved_wifi_connects():
+    with patch.object(wifi_startup, "connection_mode", return_value="ap"), \
+            patch.object(wifi_startup, "hotspot_has_clients", return_value=False), \
+            patch.object(wifi_startup, "wait_for_saved_wifi", return_value=False), \
+            patch.object(wifi_startup, "nmcli"), \
+            patch.object(wifi_startup.subprocess, "run") as run:
+        wifi_startup.retry_saved_wifi()
+    assert run.call_args_list[-1].args[0] == ["systemctl", "start", "magicboxie-hotspot.service"]
+
+
+def test_retry_flag_skips_startup_policy():
+    with patch.object(wifi_startup.sys, "argv", ["wifi_startup.py", "--retry"]), \
+            patch.object(wifi_startup, "retry_saved_wifi") as retry, \
+            patch.object(wifi_startup, "restore_saved_networks") as restore:
+        wifi_startup.main()
+    retry.assert_called_once_with()
+    restore.assert_not_called()
