@@ -178,18 +178,22 @@ def test_refresh_status_persists_playback_state(tmp_path):
     }
 
 
-def test_stopping_clears_persisted_state(tmp_path):
+def test_stopping_keeps_the_last_movie_and_position_for_resume(tmp_path):
     state_path = tmp_path / "playback_state.json"
+    player = FakeMpv()
 
     async def scenario():
-        controller = PlaybackController(FakeLibrary(), FakeMpv(), state_path=state_path)
-        await controller.handle_command(Command(opcode=Opcode.SELECT_MOVIE, argument=0))
-        await controller.refresh_status()
+        controller = PlaybackController(FakeLibrary(), player, state_path=state_path)
+        await controller.handle_command(Command(opcode=Opcode.SELECT_MOVIE, argument=1))
+        player.position = 77
         await controller.handle_command(Command(opcode=Opcode.STOP))
+        assert controller.is_idle
+        restarted = PlaybackController(FakeLibrary(), FakeMpv(), state_path=state_path)
+        assert await restarted.restore_last_playback()
 
     asyncio.run(scenario())
 
-    assert not state_path.exists()
+    assert json.loads(state_path.read_text()) == {"movie_id": 1, "position_seconds": 77, "paused": False}
 
 
 def test_player_becoming_idle_without_eof_clears_persisted_state(tmp_path):

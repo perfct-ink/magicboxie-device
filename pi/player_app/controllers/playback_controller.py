@@ -207,31 +207,22 @@ class PlaybackController:
         """What both an explicit stop command and the local keyboard's
         Escape key do - stop whatever's playing and return to the thumbnail
         grid, so the screen never just goes blank or freezes on the last
-        frame."""
+        frame. The movie and its exact position stay saved: after an update
+        or reboot the device resumes the last played movie even if it was
+        stopped (only one that played to its end or failed is forgotten)."""
+        movie_id = self._current_movie_id
+        if movie_id is not None and not (self.player.finished or self.player.failed or self.player.loading):
+            position = await self.player.get_position()
+            self._last_checkpoint_at = None
+            await run_io(self._save_playback_state, movie_id, position, False)
+        else:
+            await run_io(self._clear_playback_state)
         await self._remember_position()
         await self.player.stop()
         self._current_movie_id = None
-        await run_io(self._clear_playback_state)
         # The pause icon/dim are a separate overlay layer from whatever's
         # loaded, so stopping while paused would otherwise leave them
         # visible over the idle screen.
-        await self.player.hide_pause_icon()
-        await self.player.set_dim(0)
-        await self._show_idle_screen_locked()
-
-    async def _stop_for_update(self) -> None:
-        """An update is installing: stop the movie so the install has the CPU
-        and the restart is clean. The saved playback state is kept, with the
-        exact position, so the restarted player carries on where it left off."""
-        movie_id = self._current_movie_id
-        if not (self.player.finished or self.player.failed or self.player.loading):
-            position = await self.player.get_position()
-            paused = await self.player.get_paused()
-            self._last_checkpoint_at = None
-            await run_io(self._save_playback_state, movie_id, position, paused)
-        await self._remember_position()
-        await self.player.stop()
-        self._current_movie_id = None
         await self.player.hide_pause_icon()
         await self.player.set_dim(0)
         await self._show_idle_screen_locked()
@@ -283,7 +274,7 @@ class PlaybackController:
             return PlaybackState.idle()
 
         if self._software_update_phase == "installing":
-            await self._stop_for_update()
+            await self._stop_and_show_idle_screen()
             return PlaybackState.idle()
 
         if self.player.failed:
