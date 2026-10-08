@@ -141,19 +141,33 @@ curl http://localhost:8000/api/version
 
 Press `Ctrl-C` to stop following logs; this does not stop the service.
 
-## TV output
+## Connection modes
 
-The player drives HDMI at **720x480** by default, the size of an NTSC/DVD
-picture, because the TV is fed through an HDMI-to-composite converter (HDMI
-carries the audio; the Zero 2 W has no analog audio jack). mpv sets the mode
-with `--drm-mode`, corrects for the 4:3 TV's non-square pixels, and the TV home
-screen uses a three-column layout sized for it. Setup also adds
-`video=HDMI-A-1:720x480@60` to `/boot/firmware/cmdline.txt` so the console
-uses the same mode from boot. If a keyboard is plugged in when the player
-starts (a desk setup on a regular monitor), it keeps the screen's own preferred
-mode and the HD home screen instead. To force a mode either way, for example for a TV connected directly over HDMI, set
+The player runs in one of two modes, chosen when it starts:
+
+| | **Car mode** (default) | **Debug mode** |
+| --- | --- | --- |
+| Setup | Honda Pilot rear-seat screen, fed through an HDMI-to-composite converter | Plugged into a computer monitor or TV, with a USB keyboard |
+| How it is chosen | No keyboard attached at startup | A keyboard is attached at startup |
+| HDMI output | 720x480, which the converter turns into the screen's 480i composite signal | The screen's own preferred mode (usually 1080p) |
+| Home screen | Three-column layout sized for 480 lines | Six-column HD layout |
+
+Car mode keeps HDMI rather than the Pi's composite pads because HDMI carries
+the audio too; the Zero 2 W has no analog audio jack. In car mode mpv sets the
+mode with `--drm-mode=720x480` and corrects for the 4:3 screen's non-square
+pixels, so pictures are not stretched. Setup also adds
+`video=HDMI-A-1:720x480@60` to `/boot/firmware/cmdline.txt` so boot messages
+use the same mode and the converter never has to resync. In debug mode the
+console still starts at 720x480 and mpv switches to the screen's preferred
+mode when the player starts.
+
+The mode is checked once, when the player starts. After plugging a keyboard in
+or out, reboot or restart the player (`make pi-restart`) to switch. A TV
+remote sending commands over HDMI does not count as a keyboard. To force a
+mode regardless of the keyboard, set for example
 `Environment=MAGICBOXIE_DISPLAY_MODE=1920x1080` in the player's unit (and
-remove that `video=` entry).
+remove the `video=` entry from `cmdline.txt` for a screen that should never
+use 480 lines).
 
 ## Add movies
 
