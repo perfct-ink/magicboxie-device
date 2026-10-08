@@ -7,6 +7,25 @@ natively under systemd; Docker is only used for development.
 See [deployment.md](deployment.md) for deployment commands, device discovery,
 Wi-Fi configuration, self-update behavior, and verification.
 
+## The two Raspberry Pis
+
+MagicBoxie runs on two separate Raspberry Pis:
+
+| | **Player** | **Media server (home cloud)** |
+| --- | --- | --- |
+| Repository | `magicboxie-player` (this repo) | `magicboxie-web` |
+| Hardware | Raspberry Pi Zero 2 W | Raspberry Pi |
+| Hostname | `magicboxie-player` (`magicboxie-player.local`) | `magicboxie` (`magicboxie.lan`, `magicboxie.local`) |
+| Where it lives | In the car, playing on the Honda Pilot screen (see [Connection modes](#connection-modes)) | At home on the home network |
+| Job | Plays movies, serves its own control page and API, BLE control from the iOS app | Imports, stores and transcodes the movie library; serves the web app |
+
+The player is offline most of the time. Whenever it is on the home Wi-Fi it
+checks in with the media server at `http://magicboxie.lan` and downloads any
+movies it doesn't have yet (`pi/player_app/services/home_sync_service.py`).
+Deploy each repo only to its own Pi: the media server also advertises a
+`MagicBoxieDevice` service, so a name or API response alone does not tell the
+two apart (see [deployment.md](deployment.md)).
+
 ## Install on a Raspberry Pi
 
 Start with Raspberry Pi OS (or another Debian-based Pi installation), connect
