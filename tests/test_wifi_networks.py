@@ -64,3 +64,26 @@ def test_bad_credentials_file_keeps_startup_functional_and_logs_no_secrets(caplo
         wifi_startup.restore_saved_networks()
     cli.assert_not_called()
     assert "secret-password" not in caplog.text
+
+
+def test_add_missing_networks_keeps_existing_entries(tmp_path):
+    from player_app.wifi_networks import add_missing_networks, load_networks
+
+    seed = tmp_path / "seed.json"
+    seed.write_text('{"version": 1, "networks": [{"ssid": "Mitera", "password": "seed"}, {"ssid": "Phone", "password": "p"}]}')
+    device = tmp_path / "device.json"
+    device.write_text('{"version": 1, "networks": [{"ssid": "Mitera", "password": "changed"}]}')
+    assert add_missing_networks(seed, device) == ["Phone"]
+    assert load_networks(device) == [{"ssid": "Mitera", "password": "changed"}, {"ssid": "Phone", "password": "p"}]
+    assert add_missing_networks(seed, device) == []
+
+
+def test_add_missing_networks_fills_an_empty_device_file(tmp_path):
+    from player_app.wifi_networks import add_missing_networks, load_networks
+
+    seed = tmp_path / "seed.json"
+    seed.write_text('{"version": 1, "networks": [{"ssid": "Mitera", "password": "x"}]}')
+    device = tmp_path / "device.json"
+    device.write_text('{"version": 1, "networks": []}')
+    assert add_missing_networks(seed, device) == ["Mitera"]
+    assert [n["ssid"] for n in load_networks(device)] == ["Mitera"]

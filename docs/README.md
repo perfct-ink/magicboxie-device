@@ -66,7 +66,8 @@ preempt the saved-network startup window. Profile activation uses
 Saved SSIDs and passwords live in **`/var/lib/magicboxie/wifi-networks.json`**,
 outside the Git checkout. The installer copies the tracked **`pi/system/wifi-networks.json`** only if the
 device file does not already exist, preserves it across updates, and sets permissions to `600`
-(owner and root only). Successful BLE provisioning updates this file atomically.
+(owner and root only). Every deploy and update also adds any network in the tracked file whose
+SSID the device file lacks, without changing existing entries or their passwords. Successful BLE provisioning updates this file atomically.
 Startup restores these entries into NetworkManager before trying saved Wi-Fi.
 Existing NetworkManager-only profiles also continue to work.
 

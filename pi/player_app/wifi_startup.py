@@ -26,14 +26,25 @@ INTERFACE = "wlan0"
 STARTUP_WAIT_SECONDS = 30
 
 
-def nmcli(*args: str, timeout: float = 2) -> str:
+# Creating or changing a profile can take NetworkManager several seconds on
+# a busy Zero at boot; polling queries stay short.
+PROFILE_TIMEOUT_SECONDS = 15
+
+
+def nmcli(*args: str, timeout: float = 2, log_failure: bool = False) -> str:
     try:
         result = subprocess.run(
             ["nmcli", "--terse", "--escape", "no", *args],
             capture_output=True, text=True, timeout=timeout, check=True,
         )
         return result.stdout.strip()
-    except (subprocess.SubprocessError, OSError):
+    except subprocess.CalledProcessError as exc:
+        if log_failure:
+            logger.warning("nmcli %s failed: %s", " ".join(args[:3]), (exc.stderr or "").strip())
+        return ""
+    except (subprocess.SubprocessError, OSError) as exc:
+        if log_failure:
+            logger.warning("nmcli %s failed: %s", " ".join(args[:3]), exc)
         return ""
 
 
@@ -76,7 +87,8 @@ def restore_saved_networks() -> None:
         ssid, password = network["ssid"], network["password"]
         # Stable names avoid creating a new connection on every boot.
         name = "magicboxie-saved-" + hashlib.sha256(ssid.encode()).hexdigest()[:16]
-        exists = nmcli("--get-values", "connection.uuid", "connection", "show", "id", name)
+        exists = nmcli("--get-values", "connection.uuid", "connection", "show", "id", name,
+                       timeout=PROFILE_TIMEOUT_SECONDS)
         settings = ["connection.autoconnect", "yes", "802-11-wireless.ssid", ssid,
                     "802-11-wireless.mode", "infrastructure", "ipv4.method", "auto"]
         if password:
@@ -85,10 +97,13 @@ def restore_saved_networks() -> None:
             # Clear security if a previously protected SSID is now open.
             settings += ["802-11-wireless-security", ""]
         if exists:
-            nmcli("connection", "modify", "id", name, *settings)
+            nmcli("connection", "modify", "id", name, *settings,
+                  timeout=PROFILE_TIMEOUT_SECONDS, log_failure=True)
         else:
             nmcli("connection", "add", "type", "wifi", "ifname", INTERFACE,
-                  "con-name", name, *settings)
+                  "con-name", name, *settings, timeout=PROFILE_TIMEOUT_SECONDS, log_failure=True)
+    logger.info("Restored %d saved Wi-Fi network(s): %s", len(networks),
+                ", ".join(network["ssid"] for network in networks) or "none")
 
 
 def request_self_update() -> None:

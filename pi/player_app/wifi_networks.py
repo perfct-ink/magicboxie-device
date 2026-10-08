@@ -4,6 +4,7 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import sys
 from pathlib import Path
 
 if __package__:
@@ -52,3 +53,26 @@ def save_network(ssid: str, password: str, path: Path = WIFI_NETWORKS_PATH) -> N
         if not isinstance(password, str) or "\x00" in password:
             raise ValueError("Invalid Wi-Fi password")
         atomic_write(path, (json.dumps({"version": 1, "networks": networks}, indent=2) + "\n").encode())
+
+
+def add_missing_networks(seed_path: Path, path: Path = WIFI_NETWORKS_PATH) -> list:
+    """Adds seed networks whose SSID the device file lacks, keeping every
+    existing entry (and its password) as is. Lets a deploy deliver networks
+    added to the tracked seed after the device was first installed."""
+    seed = load_networks(seed_path)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    lock_path = path.with_suffix(".lock")
+    descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+    with os.fdopen(descriptor, "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        networks = load_networks(path)
+        known = {entry["ssid"] for entry in networks}
+        added = [entry for entry in seed if entry["ssid"] not in known]
+        if added:
+            atomic_write(path, (json.dumps({"version": 1, "networks": networks + added}, indent=2) + "\n").encode())
+        return [entry["ssid"] for entry in added]
+
+
+if __name__ == "__main__":
+    for name in add_missing_networks(Path(sys.argv[1])):
+        print(f"Added saved Wi-Fi network {name!r}")

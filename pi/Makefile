@@ -109,6 +109,8 @@ setup: sparse-refresh
 	fi
 	sudo chown "$$(whoami)" /var/lib/magicboxie/wifi-networks.json
 	sudo chmod 600 /var/lib/magicboxie/wifi-networks.json
+	@# Networks added to the tracked seed since this device was installed; existing entries are kept.
+	python3 -m player_app.wifi_networks system/wifi-networks.json
 	@echo "setup complete - log out/in (or reboot) so the new group membership takes effect."
 
 # Same sample-video seeding as `seed-movies`, but into the real device's

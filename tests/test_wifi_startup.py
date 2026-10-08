@@ -153,3 +153,21 @@ def test_retry_flag_skips_startup_policy():
         wifi_startup.main()
     retry.assert_called_once_with()
     restore.assert_not_called()
+
+
+def test_profile_creation_gets_a_longer_timeout_and_logs_failure(caplog):
+    error = wifi_startup.subprocess.CalledProcessError(4, "nmcli", stderr="Error: timeout")
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append((command, kwargs["timeout"]))
+        if "add" in command:
+            raise error
+        return wifi_startup.subprocess.CompletedProcess(command, 0, stdout="")
+
+    with patch.object(wifi_startup, "load_networks", return_value=[{"ssid": "Mitera", "password": "pw"}]), \
+            patch.object(wifi_startup.subprocess, "run", side_effect=run):
+        wifi_startup.restore_saved_networks()
+    assert all(timeout == wifi_startup.PROFILE_TIMEOUT_SECONDS for _, timeout in calls)
+    assert "nmcli connection add type failed: Error: timeout" in caplog.text
+    assert "pw" not in caplog.text
