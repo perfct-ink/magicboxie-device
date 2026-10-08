@@ -99,3 +99,10 @@ def test_render_idle_screen_adds_a_banner_for_activity(tmp_path):
     with Image.open(plain) as a, Image.open(banner) as b:
         assert b.height > a.height
         assert b.getpixel((5, 5)) != (0, 0, 0)
+
+
+def test_render_idle_screen_fills_the_default_720_wide_output(tmp_path):
+    output_path = tmp_path / "idle.png"
+    render_idle_screen(FakeLibrary(), output_path=output_path)
+    with Image.open(output_path) as image:
+        assert image.width == 720

@@ -12,26 +12,31 @@ from typing import Sequence
 
 from PIL import Image, ImageDraw, ImageFont
 
+from ..display import is_standard_definition
 from ..storage import atomic_write
 from ..models.library import MovieLibrary
 
 IDLE_SCREEN_PATH = Path("/tmp/magicboxie-idle-screen.png")
 
-_COLUMNS = 6
+# Standard definition (the default 720x480 output, see display.py) gets its
+# own layout: the HD grid scaled down to 720 wide would leave 7px captions.
+_SD = is_standard_definition()
+_COLUMNS = 3 if _SD else 6
+# SD: 3 columns * 240px cells = 720px, the output's exact width. HD:
 # 6 columns * 320px cells = 1920px wide, matching a real HD display's width
 # exactly - the canvas used to size itself to content alone (4 columns of
 # 300px cells = 1200px), which mpv then had to upscale ~1.6x to fill a real
 # screen, blurring the whole grid. Height still grows with row count (no
 # reason to pad it out to a fixed 1080/1200 - mpv letterboxes the
 # difference instead of stretching, which stays crisp).
-_THUMBNAIL_MAX_SIZE = (280, 200)
-_CAPTION_HEIGHT = 28
+_THUMBNAIL_MAX_SIZE = (200, 140) if _SD else (280, 200)
+_CAPTION_HEIGHT = 26 if _SD else 28
 _CELL_PADDING = 20
 _CELL_WIDTH = _THUMBNAIL_MAX_SIZE[0] + _CELL_PADDING * 2
 _CELL_HEIGHT = _THUMBNAIL_MAX_SIZE[1] + _CAPTION_HEIGHT + _CELL_PADDING * 2
 _BACKGROUND = (0, 0, 0)
 _TEXT_COLOR = (220, 220, 220)
-_CAPTION_FONT_SIZE = 18
+_CAPTION_FONT_SIZE = 17 if _SD else 18
 # fonts-dejavu-core (installed by both the Dockerfile and `make setup`) is
 # the only TrueType font guaranteed to be on the box. Without it, PIL falls
 # back to its own tiny unscaled bitmap font, which is illegible on an HDMI
@@ -49,25 +54,25 @@ _CAPTION_FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 # risk on a screen this was already once mistaken for a font bug (see the
 # idle-screen resolution fix elsewhere in this file's git history). A
 # static PNG can't actually spin either way.
-_SYNC_BADGE_MARGIN = 16
-_SYNC_BADGE_HEIGHT = 32
+_SYNC_BADGE_MARGIN = 10 if _SD else 16
+_SYNC_BADGE_HEIGHT = 26 if _SD else 32
 _SYNC_BADGE_PADDING_X = 12
 _SYNC_BADGE_COLOR = (24, 24, 24)
 _SYNC_DOT_COLOR = (245, 197, 66)
 _SYNC_LABEL_COLOR = (230, 230, 230)
-_SYNC_LABEL_FONT_SIZE = 15
-_SYNC_LABEL_MAX_WIDTH = 360
+_SYNC_LABEL_FONT_SIZE = 14 if _SD else 15
+_SYNC_LABEL_MAX_WIDTH = 260 if _SD else 360
 _SYNC_DOT_DIAMETER = 10
 
 # Footer lines: update/internet progress and whether a keyboard is attached
 # (and what Escape does). Plain ASCII/em-dash only (DejaVu Sans covers it).
-_HINT_LINE_HEIGHT = 40
-_HINT_PADDING = 16
-_HINT_FONT_SIZE = 20
+_HINT_LINE_HEIGHT = 26 if _SD else 40
+_HINT_PADDING = 10 if _SD else 16
+_HINT_FONT_SIZE = 15 if _SD else 20
 # Big banner across the top for whatever the device is busy doing (internet
 # check, updating, downloading...), readable from across the room.
-_BANNER_HEIGHT = 150
-_BANNER_FONT_SIZE = 64
+_BANNER_HEIGHT = 72 if _SD else 150
+_BANNER_FONT_SIZE = 34 if _SD else 64
 _BANNER_BACKGROUND = (176, 16, 24)
 _BANNER_COLOR = (255, 255, 255)
 _HINT_FOUND_COLOR = (120, 200, 120)

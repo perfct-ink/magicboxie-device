@@ -141,6 +141,18 @@ curl http://localhost:8000/api/version
 
 Press `Ctrl-C` to stop following logs; this does not stop the service.
 
+## TV output
+
+The player drives HDMI at **720x480** by default, the size of an NTSC/DVD
+picture, because the TV is fed through an HDMI-to-composite converter (HDMI
+carries the audio; the Zero 2 W has no analog audio jack). mpv sets the mode
+with `--drm-mode`, corrects for the 4:3 TV's non-square pixels, and the TV home
+screen uses a three-column layout sized for it. Setup also adds
+`video=HDMI-A-1:720x480@60` to `/boot/firmware/cmdline.txt` so the console
+uses the same mode from boot. For a TV connected directly over HDMI, set
+`Environment=MAGICBOXIE_DISPLAY_MODE=1920x1080` in the player's unit and
+remove that `video=` entry.
+
 ## Add movies
 
 Place supported video files in `/content`, then ask the daemon to rescan:

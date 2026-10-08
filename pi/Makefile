@@ -91,6 +91,12 @@ setup: sparse-refresh
 		sudo hostnamectl set-hostname magicboxie-player; \
 	fi
 	sudo systemctl enable --now avahi-daemon
+	@# HDMI at 720x480 from the first boot message on (see player_app/display.py), so the
+	@# HDMI-to-composite converter never has to resync when mpv takes over the screen.
+	@if [ -f /boot/firmware/cmdline.txt ] && ! grep -q 'video=HDMI-A-1:' /boot/firmware/cmdline.txt; then \
+		sudo sed -i '1 s/$$/ video=HDMI-A-1:720x480@60/' /boot/firmware/cmdline.txt; \
+		echo "Set HDMI to 720x480 in /boot/firmware/cmdline.txt (takes effect after a reboot)"; \
+	fi
 	@# Logs stay in RAM: a device that is unplugged often should not write the journal to the SD card.
 	sudo rm -rf /etc/systemd/journald.conf.d/magicboxie.conf /var/log/journal
 	sudo systemctl restart systemd-journald

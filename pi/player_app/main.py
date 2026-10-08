@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import List
 
 from .controllers.playback_controller import PlaybackController
+from .display import display_mode, is_standard_definition
 from .models.library import MovieLibrary
 from .views.player import MpvController
 from .update_status import read_message, read_status
@@ -82,7 +83,14 @@ def _mpv_output_args() -> List[str]:
     # Defaults target rendering straight to the framebuffer via DRM/KMS - the
     # Pi's own HDMI output, with no desktop environment running.
     # Override with MAGICBOXIE_MPV_ARGS if your hardware needs a different --vo/--gpu-context.
-    raw = os.environ.get("MAGICBOXIE_MPV_ARGS", "--vo=gpu --gpu-context=drm")
+    # --drm-mode picks the HDMI mode mpv sets (see display.py; 720x480 by
+    # default). 720x480 fills a 4:3 TV, so its pixels are 8:9 rather than
+    # square; --monitorpixelaspect keeps pictures from looking stretched.
+    width, height = display_mode()
+    default = f"--vo=gpu --gpu-context=drm --drm-mode={width}x{height}"
+    if is_standard_definition():
+        default += " --monitorpixelaspect=0.8889"
+    raw = os.environ.get("MAGICBOXIE_MPV_ARGS", default)
     return raw.split()
 
 

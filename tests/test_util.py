@@ -155,3 +155,26 @@ def test_host_resolves_false_when_dns_fails():
 
 def test_host_resolves_false_for_an_empty_url():
     assert asyncio.run(util.host_resolves("")) is False
+
+
+def test_display_mode_defaults_to_720x480_and_reads_the_environment(monkeypatch):
+    from player_app import display
+
+    monkeypatch.delenv("MAGICBOXIE_DISPLAY_MODE", raising=False)
+    assert display.display_mode() == (720, 480) and display.is_standard_definition()
+    monkeypatch.setenv("MAGICBOXIE_DISPLAY_MODE", "1920x1080")
+    assert display.display_mode() == (1920, 1080) and not display.is_standard_definition()
+    monkeypatch.setenv("MAGICBOXIE_DISPLAY_MODE", "nonsense")
+    assert display.display_mode() == (720, 480)
+
+
+def test_mpv_sets_the_display_mode_and_pixel_aspect(monkeypatch):
+    from player_app import main
+
+    monkeypatch.delenv("MAGICBOXIE_MPV_ARGS", raising=False)
+    monkeypatch.delenv("MAGICBOXIE_DISPLAY_MODE", raising=False)
+    assert main._mpv_output_args() == [
+        "--vo=gpu", "--gpu-context=drm", "--drm-mode=720x480", "--monitorpixelaspect=0.8889",
+    ]
+    monkeypatch.setenv("MAGICBOXIE_DISPLAY_MODE", "1920x1080")
+    assert main._mpv_output_args() == ["--vo=gpu", "--gpu-context=drm", "--drm-mode=1920x1080"]
