@@ -157,24 +157,68 @@ def test_host_resolves_false_for_an_empty_url():
     assert asyncio.run(util.host_resolves("")) is False
 
 
-def test_display_mode_defaults_to_720x480_and_reads_the_environment(monkeypatch):
+KEYBOARD = """I: Bus=0005 Vendor=004c Product=029c Version=0001
+N: Name="Magic Keyboard"
+H: Handlers=sysrq kbd leds event0
+B: EV=120013
+B: KEY=1000000000007 ff9f207ac14057ff febeffdfffefffff fffffffffffffffe
+"""
+CEC_REMOTE = """I: Bus=0000 Vendor=0000 Product=0000 Version=0000
+N: Name="vc4-hdmi"
+H: Handlers=kbd event1
+B: EV=100013
+B: KEY=1000000 0 0 0 0 0 0 0 1680 0 0 ffc
+"""
+
+
+@pytest.fixture(autouse=True)
+def _fresh_display_mode():
     from player_app import display
 
-    monkeypatch.delenv("MAGICBOXIE_DISPLAY_MODE", raising=False)
+    display.display_mode.cache_clear()
+    yield
+    display.display_mode.cache_clear()
+
+
+def _display(monkeypatch, tmp_path, devices="", mode=None):
+    from player_app import display
+
+    path = tmp_path / "devices"
+    path.write_text(devices)
+    monkeypatch.setattr(display, "INPUT_DEVICES", path)
+    monkeypatch.setattr(display.keyboard_attached, "__defaults__", (path,))
+    if mode is None:
+        monkeypatch.delenv("MAGICBOXIE_DISPLAY_MODE", raising=False)
+    else:
+        monkeypatch.setenv("MAGICBOXIE_DISPLAY_MODE", mode)
+    display.display_mode.cache_clear()
+    return display
+
+
+def test_display_mode_is_720x480_without_a_keyboard(monkeypatch, tmp_path):
+    display = _display(monkeypatch, tmp_path, CEC_REMOTE)
     assert display.display_mode() == (720, 480) and display.is_standard_definition()
-    monkeypatch.setenv("MAGICBOXIE_DISPLAY_MODE", "1920x1080")
-    assert display.display_mode() == (1920, 1080) and not display.is_standard_definition()
-    monkeypatch.setenv("MAGICBOXIE_DISPLAY_MODE", "nonsense")
+
+
+def test_display_keeps_the_preferred_mode_with_a_keyboard(monkeypatch, tmp_path):
+    display = _display(monkeypatch, tmp_path, CEC_REMOTE + "\n" + KEYBOARD)
+    assert display.display_mode() is None and not display.is_standard_definition()
+
+
+def test_configured_display_mode_wins(monkeypatch, tmp_path):
+    display = _display(monkeypatch, tmp_path, KEYBOARD, mode="720x576")
+    assert display.display_mode() == (720, 576)
+    display = _display(monkeypatch, tmp_path, "", mode="nonsense")
     assert display.display_mode() == (720, 480)
 
 
-def test_mpv_sets_the_display_mode_and_pixel_aspect(monkeypatch):
+def test_mpv_sets_the_display_mode_and_pixel_aspect(monkeypatch, tmp_path):
     from player_app import main
 
     monkeypatch.delenv("MAGICBOXIE_MPV_ARGS", raising=False)
-    monkeypatch.delenv("MAGICBOXIE_DISPLAY_MODE", raising=False)
+    _display(monkeypatch, tmp_path)
     assert main._mpv_output_args() == [
         "--vo=gpu", "--gpu-context=drm", "--drm-mode=720x480", "--monitorpixelaspect=0.8889",
     ]
-    monkeypatch.setenv("MAGICBOXIE_DISPLAY_MODE", "1920x1080")
-    assert main._mpv_output_args() == ["--vo=gpu", "--gpu-context=drm", "--drm-mode=1920x1080"]
+    _display(monkeypatch, tmp_path, KEYBOARD)
+    assert main._mpv_output_args() == ["--vo=gpu", "--gpu-context=drm", "--drm-mode=preferred"]

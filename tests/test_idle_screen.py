@@ -101,8 +101,11 @@ def test_render_idle_screen_adds_a_banner_for_activity(tmp_path):
         assert b.getpixel((5, 5)) != (0, 0, 0)
 
 
-def test_render_idle_screen_fills_the_default_720_wide_output(tmp_path):
+def test_render_idle_screen_matches_the_output_width(tmp_path):
+    from player_app.views import idle_screen
+
     output_path = tmp_path / "idle.png"
     render_idle_screen(FakeLibrary(), output_path=output_path)
     with Image.open(output_path) as image:
-        assert image.width == 720
+        # 720 on the default 480-line output; 1920 when this machine has a keyboard.
+        assert image.width == (720 if idle_screen._SD else 1920)

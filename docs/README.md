@@ -149,9 +149,11 @@ carries the audio; the Zero 2 W has no analog audio jack). mpv sets the mode
 with `--drm-mode`, corrects for the 4:3 TV's non-square pixels, and the TV home
 screen uses a three-column layout sized for it. Setup also adds
 `video=HDMI-A-1:720x480@60` to `/boot/firmware/cmdline.txt` so the console
-uses the same mode from boot. For a TV connected directly over HDMI, set
-`Environment=MAGICBOXIE_DISPLAY_MODE=1920x1080` in the player's unit and
-remove that `video=` entry.
+uses the same mode from boot. If a keyboard is plugged in when the player
+starts (a desk setup on a regular monitor), it keeps the screen's own preferred
+mode and the HD home screen instead. To force a mode either way, for example for a TV connected directly over HDMI, set
+`Environment=MAGICBOXIE_DISPLAY_MODE=1920x1080` in the player's unit (and
+remove that `video=` entry).
 
 ## Add movies
 

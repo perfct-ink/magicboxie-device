@@ -83,11 +83,11 @@ def _mpv_output_args() -> List[str]:
     # Defaults target rendering straight to the framebuffer via DRM/KMS - the
     # Pi's own HDMI output, with no desktop environment running.
     # Override with MAGICBOXIE_MPV_ARGS if your hardware needs a different --vo/--gpu-context.
-    # --drm-mode picks the HDMI mode mpv sets (see display.py; 720x480 by
-    # default). 720x480 fills a 4:3 TV, so its pixels are 8:9 rather than
+    # --drm-mode picks the HDMI mode mpv sets (see display.py: 720x480 by
+    # default, the screen's preferred mode with a keyboard attached). 720x480 fills a 4:3 TV, so its pixels are 8:9 rather than
     # square; --monitorpixelaspect keeps pictures from looking stretched.
-    width, height = display_mode()
-    default = f"--vo=gpu --gpu-context=drm --drm-mode={width}x{height}"
+    mode = display_mode()
+    default = "--vo=gpu --gpu-context=drm --drm-mode=" + (f"{mode[0]}x{mode[1]}" if mode else "preferred")
     if is_standard_definition():
         default += " --monitorpixelaspect=0.8889"
     raw = os.environ.get("MAGICBOXIE_MPV_ARGS", default)
