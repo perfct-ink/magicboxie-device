@@ -32,9 +32,10 @@ Restart=on-failure
 RestartSec=2
 
 # DRM/KMS output + evdev keyboard input + BlueZ D-Bus - see `make setup`,
-# which adds @USER@ to these groups. CAP_NET_ADMIN lets the ExecStartPre
+# which adds @USER@ to these groups (systemd-journal lets the web page's Logs
+# view read the Wi-Fi and update units' logs). CAP_NET_ADMIN lets the ExecStartPre
 # rfkill unblock above work without running the whole service as root.
-SupplementaryGroups=video input bluetooth
+SupplementaryGroups=video input bluetooth systemd-journal
 AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
 
 [Install]

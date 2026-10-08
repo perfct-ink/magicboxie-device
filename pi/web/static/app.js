@@ -212,11 +212,39 @@ function openSettings() {
       note.textContent = 'Shutting down… wait for the activity light to stop before unplugging.';
     } catch (error) {note.textContent = error.message;}
   });
+  const logsButton = document.createElement('button'); logsButton.className = 'btn grey'; logsButton.textContent = 'Logs';
+  logsButton.addEventListener('click', openLogs);
   const close = document.createElement('button'); close.className = 'btn grey'; close.textContent = 'Close';
   close.addEventListener('click', closeSheet);
-  row.append(reboot, shutdown, close); body.append(h, details, note, row); panel.append(body);
+  row.append(logsButton, reboot, shutdown, close); body.append(h, details, note, row); panel.append(body);
   $('sheet').classList.remove('hidden');
   refreshSettings(); clearInterval(settingsTimer); settingsTimer = setInterval(() => {if (!document.hidden) refreshSettings();}, 5000);
+}
+// ---- Logs: Wi-Fi, startup and update logs for this boot ----
+async function refreshLogs() {
+  const out = $('logsBody');
+  try {
+    const data = await api('/api/logs');
+    const saved = data.saved_networks ? data.saved_networks.join(', ') || 'None' : 'Could not read';
+    const profiles = (data.wifi_profiles || []).map(p => p.name + (p.autoconnect ? '' : ' (no autoconnect)')).join(', ') || 'None';
+    $('logsInfo').replaceChildren(section('Wi-Fi', [['Saved networks', saved], ['NetworkManager profiles', profiles]]));
+    out.textContent = data.journal; out.scrollTop = out.scrollHeight;
+  } catch (error) {out.textContent = 'Could not load logs: ' + error.message;}
+}
+function openLogs() {
+  clearInterval(settingsTimer);
+  const panel = $('panel'); panel.replaceChildren();
+  const body = document.createElement('div'); body.className = 'body';
+  const h = document.createElement('h3'); h.textContent = 'Logs';
+  const info = document.createElement('div'); info.id = 'logsInfo';
+  const out = document.createElement('pre'); out.id = 'logsBody'; out.className = 'logs'; out.textContent = 'Loading…';
+  const row = document.createElement('div'); row.className = 'row';
+  const refresh = document.createElement('button'); refresh.className = 'btn'; refresh.textContent = 'Refresh';
+  refresh.addEventListener('click', refreshLogs);
+  const back = document.createElement('button'); back.className = 'btn grey'; back.textContent = 'Back';
+  back.addEventListener('click', openSettings);
+  row.append(refresh, back); body.append(h, info, out, row); panel.append(body);
+  $('sheet').classList.remove('hidden'); refreshLogs();
 }
 $('gear').addEventListener('click', openSettings);
 $('busy').addEventListener('click', openSettings);

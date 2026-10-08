@@ -90,6 +90,7 @@ def create_app(controller: PlaybackController) -> web.Application:
     app.router.add_post("/api/command", _post_command)
     app.router.add_get("/api/version", _get_version)
     app.router.add_get("/api/info", _get_info)
+    app.router.add_get("/api/logs", _get_logs)
     app.router.add_post("/api/reboot", _post_reboot)
     app.router.add_post("/api/shutdown", _post_shutdown)
     app.router.add_post("/api/portal/done", _post_portal_done)
@@ -387,6 +388,12 @@ async def _get_info(request: web.Request) -> web.Response:
         "keyboards": list(controller.keyboard_names),
     })
     return web.json_response(info)
+
+
+async def _get_logs(request: web.Request) -> web.Response:
+    """Recent Wi-Fi, startup and update logs for the settings panel, so a
+    device on its hotspot can be diagnosed from a phone without SSH."""
+    return web.json_response(await run_io(system_info.logs))
 
 
 async def _post_reboot(request: web.Request) -> web.Response:

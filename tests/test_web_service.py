@@ -629,6 +629,44 @@ def test_info_reports_device_details():
     assert data["playback_status"] == "stopped"
 
 
+def test_logs_returns_journal_and_wifi_details():
+    async def scenario():
+        client, _ = await _make_client()
+        try:
+            payload = {"journal": "wifi line", "saved_networks": ["Mitera"], "wifi_profiles": []}
+            with patch("web.web_service.system_info.logs", return_value=payload):
+                response = await client.get("/api/logs")
+                return response.status, await response.json()
+        finally:
+            await client.close()
+
+    status, data = asyncio.run(scenario())
+    assert status == 200
+    assert data["saved_networks"] == ["Mitera"]
+
+
+def test_logs_lists_wifi_units_and_never_passwords(tmp_path):
+    from web import system_info
+
+    networks = tmp_path / "wifi.json"
+    networks.write_text('{"version": 1, "networks": [{"ssid": "Mitera", "password": "secret"}]}')
+    profiles = "Mitera home:802-11-wireless:yes\nWired:802-3-ethernet:yes\nmagicboxie-hotspot:802-11-wireless:no"
+
+    def run(*command, timeout=3):
+        return profiles if command[0] == "nmcli" else " ".join(command)
+
+    with patch("player_app.wifi_networks.WIFI_NETWORKS_PATH", networks), \
+            patch("player_app.wifi_networks.load_networks.__defaults__", (networks,)), \
+            patch.object(system_info, "_run", side_effect=run):
+        data = system_info.logs()
+    assert "-u magicboxie-wifi-startup" in data["journal"] and "-b" in data["journal"]
+    assert data["saved_networks"] == ["Mitera"]
+    assert "secret" not in str(data)
+    assert data["wifi_profiles"] == [
+        {"name": "Mitera home", "autoconnect": True}, {"name": "magicboxie-hotspot", "autoconnect": False},
+    ]
+
+
 def test_reboot_reports_success_and_failure():
     async def scenario(error):
         client, _ = await _make_client()

@@ -122,6 +122,48 @@ def snapshot(movies_root) -> dict:
     }
 
 
+# Units whose logs explain Wi-Fi, startup and update behavior, in that order.
+LOG_UNITS = (
+    "magicboxie-wifi-startup", "magicboxie-wifi-retry", "magicboxie-hotspot", "NetworkManager",
+    "magicboxie-player", "magicboxie-boot-update", "magicboxie-self-update",
+)
+LOG_LINES = 300
+
+
+def saved_wifi_names() -> Optional[list]:
+    """SSIDs from the device's saved-network file (never the passwords)."""
+    from player_app.wifi_networks import load_networks
+
+    try:
+        return [network["ssid"] for network in load_networks()]
+    except (OSError, ValueError):
+        return None
+
+
+def wifi_profiles() -> list:
+    """NetworkManager's saved Wi-Fi profiles as [{"name", "autoconnect"}]."""
+    output = _run("nmcli", "--terse", "--escape", "no", "-f", "NAME,TYPE,AUTOCONNECT", "connection", "show")
+    profiles = []
+    for line in (output or "").splitlines():
+        fields = line.rsplit(":", 2)
+        if len(fields) == 3 and fields[1] == "802-11-wireless":
+            profiles.append({"name": fields[0], "autoconnect": fields[2] == "yes"})
+    return profiles
+
+
+def logs(lines: int = LOG_LINES) -> dict:
+    """This boot's journal for LOG_UNITS plus what Wi-Fi is configured, for
+    the web page's Logs view. Reading other units' logs needs the
+    systemd-journal group (see magicboxie-player.service.in)."""
+    units = [arg for unit in LOG_UNITS for arg in ("-u", unit)]
+    text = _run("journalctl", "-b", "--no-pager", "-o", "short", "-n", str(lines), *units, timeout=10)
+    return {
+        "journal": text if text is not None else "Could not read the system journal.",
+        "saved_networks": saved_wifi_names(),
+        "wifi_profiles": wifi_profiles(),
+    }
+
+
 async def _systemctl_power(action: str) -> Optional[str]:
     """Runs `systemctl <action>` (reboot or poweroff); returns an error
     message if it could not start.
