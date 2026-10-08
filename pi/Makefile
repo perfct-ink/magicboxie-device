@@ -287,8 +287,10 @@ self-update-service:
 	sudo cp system/magicboxie-self-update.timer.in $(SELF_UPDATE_TIMER_FILE)
 	sed -e 's|@REPO_DIR@|$(CURDIR)|g' \
 		system/magicboxie-boot-update.service.in | sudo tee $(BOOT_UPDATE_SERVICE_FILE) >/dev/null
+	sudo install -m 644 system/magicboxie-apt-update.service system/magicboxie-apt-update.timer /etc/systemd/system/
 	sudo systemctl daemon-reload
 	sudo systemctl enable --now $(SELF_UPDATE_NAME).timer
+	sudo systemctl enable --now magicboxie-apt-update.timer
 	sudo systemctl enable $(BOOT_UPDATE_NAME).service
 	@echo "Self-update timer installed and enabled - runs daily, check with: systemctl list-timers $(SELF_UPDATE_NAME).timer"
 
@@ -313,6 +315,8 @@ logs:
 	journalctl -u $(SERVICE_NAME) -f
 
 uninstall:
+	sudo systemctl disable --now magicboxie-apt-update.timer 2>/dev/null || true
+	sudo rm -f /etc/systemd/system/magicboxie-apt-update.service /etc/systemd/system/magicboxie-apt-update.timer
 	sudo systemctl disable --now magicboxie-splash 2>/dev/null || true
 	sudo rm -f /etc/systemd/system/magicboxie-splash.service /usr/local/lib/magicboxie/splash.py
 	sudo systemctl disable --now magicboxie-wifi-retry.timer 2>/dev/null || true

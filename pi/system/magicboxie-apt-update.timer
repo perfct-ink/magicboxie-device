@@ -1,0 +1,13 @@
+# Monthly. Persistent=true runs a missed month once the device is next up;
+# the service simply fails harmlessly while offline and retries next month
+# (or after the next boot's catch-up). RandomizedDelaySec avoids a fixed time.
+[Unit]
+Description=Refresh apt package lists monthly
+
+[Timer]
+OnCalendar=monthly
+RandomizedDelaySec=1d
+Persistent=true
+
+[Install]
+WantedBy=timers.target

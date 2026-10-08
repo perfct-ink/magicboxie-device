@@ -231,6 +231,7 @@ reports that it is not permitted.
 | `magicboxie-boot-update` | oneshot, at boot | Polls for internet up to 30 s at lowest CPU/IO priority, then queues a self-update |
 | `magicboxie-self-update` | oneshot | Pulls and, if there is new code, installs it at once; started by startup, boot-update and the timer |
 | `magicboxie-self-update.timer` | timer | Daily run, up to 1 h random delay, catches up missed runs |
+| `magicboxie-apt-update.timer` | timer | Monthly `apt-get update` in the background at idle priority (not part of updates, which would wait on it) |
 | `magicboxie-wifi-search` | oneshot, on demand | Settings-menu Wi-Fi search described above |
 
 Progress text ("Checking for internet…", update phases) travels from the

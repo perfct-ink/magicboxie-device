@@ -1,0 +1,15 @@
+# Refreshes the apt package lists in the background. Run monthly by
+# magicboxie-apt-update.timer instead of on every software update, since it is
+# slow. Lowest CPU/IO priority so it never disturbs playback.
+[Unit]
+Description=MagicBoxie monthly apt package list refresh
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Nice=19
+CPUSchedulingPolicy=idle
+IOSchedulingClass=idle
+ExecStart=/usr/bin/apt-get update
+TimeoutStartSec=1800
