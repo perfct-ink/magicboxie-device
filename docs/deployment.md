@@ -256,6 +256,26 @@ service uses `Restart=on-failure`, so systemd does not bring it back. It stays
 off, with the web page, BLE and mDNS, until the next reboot or a manual
 `sudo systemctl start magicboxie-player`. A later self-update also restarts it.
 
+## Boot loader screen
+
+`magicboxie-splash.service` runs before the console login on tty1. It puts the
+console in graphics mode (no text shows), blanks the screen and draws a small
+spinner on the framebuffer until the player's mpv is up. It then hands the
+screen to the player and waits. When the player has been stopped for three
+seconds in a row (for example after Escape), it switches the console back to
+text and the login prompt returns. A restart in the middle of a self-update
+is too short to count.
+
+- Escape on any attached keyboard during the loader returns to the prompt and
+  stops `magicboxie-player`.
+- If the framebuffer or player never appears, the loader gives up after two
+  minutes and shows the prompt.
+- Kernel boot text appears before this service starts. To hide it too, append
+  `quiet loglevel=0 logo.nologo vt.global_cursor_default=0` to
+  `/boot/firmware/cmdline.txt` by hand (one line, a mistake can stop the Pi
+  booting, so this is not done automatically).
+- Installed by `make pi-wifi-service` (and so by install/deploy).
+
 ## Self-update lifecycle
 
 The same `magicboxie-self-update.service` handles the request after saved

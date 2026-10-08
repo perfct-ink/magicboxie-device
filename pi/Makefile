@@ -180,7 +180,8 @@ wifi-service:
 	sudo systemctl enable --now NetworkManager
 	sudo nmcli connection reload
 	sudo install -d -m 755 /usr/local/lib/magicboxie
-	sudo install -m 644 player_app/wifi_startup.py player_app/wifi_networks.py player_app/storage.py /usr/local/lib/magicboxie/
+	sudo install -m 644 player_app/wifi_startup.py player_app/wifi_networks.py player_app/storage.py player_app/splash.py /usr/local/lib/magicboxie/
+	sudo install -m 644 system/magicboxie-splash.service /etc/systemd/system/magicboxie-splash.service
 	sudo install -m 644 system/magicboxie-wifi-startup.service /etc/systemd/system/magicboxie-wifi-startup.service
 	sudo install -m 644 system/magicboxie-wifi-retry.service /etc/systemd/system/magicboxie-wifi-retry.service
 	sudo install -m 644 system/magicboxie-wifi-retry.timer /etc/systemd/system/magicboxie-wifi-retry.timer
@@ -188,7 +189,7 @@ wifi-service:
 	$(MAKE) sudoers
 	sudo systemctl disable magicboxie-hotspot
 	sudo systemctl daemon-reload
-	sudo systemctl enable magicboxie-wifi-startup
+	sudo systemctl enable magicboxie-wifi-startup magicboxie-splash
 	sudo systemctl enable --now magicboxie-wifi-retry.timer
 
 wifi-start:
@@ -336,6 +337,8 @@ logs:
 	journalctl -u $(SERVICE_NAME) -f
 
 uninstall:
+	sudo systemctl disable --now magicboxie-splash 2>/dev/null || true
+	sudo rm -f /etc/systemd/system/magicboxie-splash.service /usr/local/lib/magicboxie/splash.py
 	sudo systemctl disable --now magicboxie-wifi-retry.timer 2>/dev/null || true
 	sudo rm -f /etc/systemd/system/magicboxie-wifi-retry.service /etc/systemd/system/magicboxie-wifi-retry.timer
 	sudo systemctl disable --now magicboxie-wifi-startup 2>/dev/null || true

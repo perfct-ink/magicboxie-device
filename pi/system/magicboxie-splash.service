@@ -1,0 +1,16 @@
+# Black screen with a small spinner from early boot until the player takes
+# over, instead of the console login. Escape gives the screen back to the
+# login prompt and stops the player. Started before getty on tty1.
+[Unit]
+Description=MagicBoxie boot loader screen
+DefaultDependencies=no
+After=systemd-udevd.service local-fs.target
+Before=getty@tty1.service magicboxie-player.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/local/lib/magicboxie/splash.py
+TimeoutStopSec=5
+
+[Install]
+WantedBy=multi-user.target
