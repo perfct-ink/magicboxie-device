@@ -77,7 +77,6 @@ pull: sparse-refresh
 # required for that group change to apply.
 setup: sparse-refresh
 	@command -v apt-get >/dev/null || { echo "apt-get not found - these targets are for Raspberry Pi OS/Debian"; exit 1; }
-	sudo apt-get update
 	sudo apt-get install -y --no-install-recommends \
 		python3-venv python3-dev build-essential \
 		mpv ffmpeg libjpeg-dev zlib1g-dev \
