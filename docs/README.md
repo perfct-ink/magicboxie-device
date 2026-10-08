@@ -181,7 +181,7 @@ It detects the existing checkout, updates it, and reapplies the installation.
 
 - Confirm the daemon is running with `systemctl status magicboxie-player`.
 - Inspect recent logs with `journalctl -u magicboxie-player -n 100`.
-- Without SSH (for example from a phone on the hotspot), open the device's web page, tap the gear, then **Logs**: it shows this boot's Wi-Fi, startup and update logs, the saved network names, and NetworkManager's Wi-Fi profiles.
+- Without SSH (for example from a phone on the hotspot), open the device's web page, tap the gear, then **Logs**: it has Player, Wi-Fi and Updates tabs with this boot's logs (times in seconds since boot); the Wi-Fi tab also lists the saved network names, NetworkManager's Wi-Fi profiles, the adapter state and the networks in range.
 - Check startup selection with `systemctl status magicboxie-wifi-startup`
   and `journalctl -u magicboxie-wifi-startup -b`.
 - Check the hotspot with `systemctl status magicboxie-hotspot` and

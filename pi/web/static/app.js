@@ -220,14 +220,20 @@ function openSettings() {
   $('sheet').classList.remove('hidden');
   refreshSettings(); clearInterval(settingsTimer); settingsTimer = setInterval(() => {if (!document.hidden) refreshSettings();}, 5000);
 }
-// ---- Logs: Wi-Fi, startup and update logs for this boot ----
+// ---- Logs: this boot's Player, Wi-Fi and Update logs (times are seconds since boot) ----
+let logSource = 'wifi';
 async function refreshLogs() {
-  const out = $('logsBody');
+  const out = $('logsBody'), info = $('logsInfo');
   try {
-    const data = await api('/api/logs');
-    const saved = data.saved_networks ? data.saved_networks.join(', ') || 'None' : 'Could not read';
-    const profiles = (data.wifi_profiles || []).map(p => p.name + (p.autoconnect ? '' : ' (no autoconnect)')).join(', ') || 'None';
-    $('logsInfo').replaceChildren(section('Wi-Fi', [['Saved networks', saved], ['NetworkManager profiles', profiles]]));
+    const data = await api('/api/logs?source=' + logSource);
+    info.replaceChildren();
+    if (data.source === 'wifi') {
+      const saved = data.saved_networks ? data.saved_networks.join(', ') || 'None' : 'Could not read';
+      const profiles = (data.wifi_profiles || []).map(p => p.name + (p.autoconnect ? '' : ' (no autoconnect)')).join(', ') || 'None';
+      const visible = (data.in_range || []).map(n => n.ssid + ' (' + n.signal + '%)').join(', ') || 'None seen (no scan while the hotspot is on)';
+      info.append(section('Wi-Fi', [['Saved networks', saved], ['NetworkManager profiles', profiles],
+        ['Wi-Fi adapter', data.adapter], ['In range', visible]]));
+    }
     out.textContent = data.journal; out.scrollTop = out.scrollHeight;
   } catch (error) {out.textContent = 'Could not load logs: ' + error.message;}
 }
@@ -236,14 +242,24 @@ function openLogs() {
   const panel = $('panel'); panel.replaceChildren();
   const body = document.createElement('div'); body.className = 'body';
   const h = document.createElement('h3'); h.textContent = 'Logs';
+  const tabs = document.createElement('div'); tabs.className = 'tabs';
+  for (const [source, label] of [['player', 'Player'], ['wifi', 'Wi-Fi'], ['update', 'Updates']]) {
+    const tab = document.createElement('button'); tab.className = 'btn small' + (source === logSource ? '' : ' grey'); tab.textContent = label;
+    tab.addEventListener('click', () => {logSource = source; openLogs();}); tabs.append(tab);
+  }
   const info = document.createElement('div'); info.id = 'logsInfo';
   const out = document.createElement('pre'); out.id = 'logsBody'; out.className = 'logs'; out.textContent = 'Loading…';
   const row = document.createElement('div'); row.className = 'row';
   const refresh = document.createElement('button'); refresh.className = 'btn'; refresh.textContent = 'Refresh';
   refresh.addEventListener('click', refreshLogs);
+  const copy = document.createElement('button'); copy.className = 'btn grey'; copy.textContent = 'Copy';
+  copy.addEventListener('click', async () => {
+    try {await navigator.clipboard.writeText(out.textContent); copy.textContent = 'Copied';}
+    catch {const range = document.createRange(); range.selectNodeContents(out); getSelection().removeAllRanges(); getSelection().addRange(range); copy.textContent = 'Selected';}
+  });
   const back = document.createElement('button'); back.className = 'btn grey'; back.textContent = 'Back';
   back.addEventListener('click', openSettings);
-  row.append(refresh, back); body.append(h, info, out, row); panel.append(body);
+  row.append(refresh, copy, back); body.append(h, tabs, info, out, row); panel.append(body);
   $('sheet').classList.remove('hidden'); refreshLogs();
 }
 $('gear').addEventListener('click', openSettings);

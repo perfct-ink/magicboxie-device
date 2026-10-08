@@ -393,7 +393,15 @@ async def _get_info(request: web.Request) -> web.Response:
 async def _get_logs(request: web.Request) -> web.Response:
     """Recent Wi-Fi, startup and update logs for the settings panel, so a
     device on its hotspot can be diagnosed from a phone without SSH."""
-    return web.json_response(await run_io(system_info.logs))
+    source = request.query.get("source", "wifi")
+    if source not in system_info.LOG_SOURCES:
+        return web.json_response({"error": f"unknown log source {source!r}"}, status=400)
+    try:
+        lines = int(request.query.get("lines", system_info.LOG_LINES))
+    except ValueError:
+        return web.json_response({"error": "lines must be a number"}, status=400)
+    lines = max(1, min(lines, system_info.MAX_LOG_LINES))
+    return web.json_response(await run_io(system_info.logs, source, lines))
 
 
 async def _post_reboot(request: web.Request) -> web.Response:

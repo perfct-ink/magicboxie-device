@@ -122,12 +122,14 @@ def snapshot(movies_root) -> dict:
     }
 
 
-# Units whose logs explain Wi-Fi, startup and update behavior, in that order.
-LOG_UNITS = (
-    "magicboxie-wifi-startup", "magicboxie-wifi-retry", "magicboxie-hotspot", "NetworkManager",
-    "magicboxie-player", "magicboxie-boot-update", "magicboxie-self-update",
-)
+# Which units each Logs tab reads, newest boot only (the journal lives in RAM).
+LOG_SOURCES = {
+    "player": ("magicboxie-player",),
+    "wifi": ("magicboxie-wifi-startup", "magicboxie-wifi-retry", "magicboxie-hotspot", "NetworkManager"),
+    "update": ("magicboxie-boot-update", "magicboxie-self-update"),
+}
 LOG_LINES = 300
+MAX_LOG_LINES = 2000
 
 
 def saved_wifi_names() -> Optional[list]:
@@ -140,28 +142,58 @@ def saved_wifi_names() -> Optional[list]:
         return None
 
 
+def _terse(*fields_and_command: str) -> list:
+    output = _run("nmcli", "--terse", "--escape", "no", *fields_and_command, timeout=10)
+    return [line for line in (output or "").splitlines() if line]
+
+
 def wifi_profiles() -> list:
     """NetworkManager's saved Wi-Fi profiles as [{"name", "autoconnect"}]."""
-    output = _run("nmcli", "--terse", "--escape", "no", "-f", "NAME,TYPE,AUTOCONNECT", "connection", "show")
     profiles = []
-    for line in (output or "").splitlines():
+    for line in _terse("-f", "NAME,TYPE,AUTOCONNECT", "connection", "show"):
         fields = line.rsplit(":", 2)
         if len(fields) == 3 and fields[1] == "802-11-wireless":
             profiles.append({"name": fields[0], "autoconnect": fields[2] == "yes"})
     return profiles
 
 
-def logs(lines: int = LOG_LINES) -> dict:
-    """This boot's journal for LOG_UNITS plus what Wi-Fi is configured, for
-    the web page's Logs view. Reading other units' logs needs the
+def wifi_adapter() -> Optional[str]:
+    """wlan0's state and connection, e.g. "connected · magicboxie-hotspot"."""
+    for line in _terse("-f", "DEVICE,STATE,CONNECTION", "device"):
+        fields = line.split(":", 2)
+        if len(fields) == 3 and fields[0] == "wlan0":
+            return " · ".join(field for field in fields[1:] if field)
+    return None
+
+
+def wifi_in_range() -> list:
+    """Visible networks as [{"ssid", "signal"}], strongest first. Empty while
+    wlan0 is the hotspot: NetworkManager does not scan in AP mode."""
+    networks = {}
+    for line in _terse("-f", "SIGNAL,SSID", "device", "wifi", "list", "--rescan", "no"):
+        signal, _, ssid = line.partition(":")
+        if ssid and signal.isdigit():
+            networks[ssid] = max(networks.get(ssid, 0), int(signal))
+    return [{"ssid": ssid, "signal": signal}
+            for ssid, signal in sorted(networks.items(), key=lambda item: -item[1])]
+
+
+def logs(source: str = "wifi", lines: int = LOG_LINES) -> dict:
+    """This boot's journal for one Logs tab, with times in seconds since boot,
+    plus a Wi-Fi summary on the wifi tab. Reading other units' logs needs the
     systemd-journal group (see magicboxie-player.service.in)."""
-    units = [arg for unit in LOG_UNITS for arg in ("-u", unit)]
-    text = _run("journalctl", "-b", "--no-pager", "-o", "short", "-n", str(lines), *units, timeout=10)
-    return {
-        "journal": text if text is not None else "Could not read the system journal.",
-        "saved_networks": saved_wifi_names(),
-        "wifi_profiles": wifi_profiles(),
-    }
+    units = [arg for unit in LOG_SOURCES[source] for arg in ("-u", unit)]
+    text = _run("journalctl", "-b", "--no-pager", "-o", "short-monotonic", "-n", str(lines), *units, timeout=10)
+    result = {"source": source,
+              "journal": text if text is not None else "Could not read the system journal."}
+    if source == "wifi":
+        result.update({
+            "saved_networks": saved_wifi_names(),
+            "wifi_profiles": wifi_profiles(),
+            "adapter": wifi_adapter(),
+            "in_range": wifi_in_range(),
+        })
+    return result
 
 
 async def _systemctl_power(action: str) -> Optional[str]:
