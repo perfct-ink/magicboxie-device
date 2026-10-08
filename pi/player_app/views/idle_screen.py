@@ -148,12 +148,12 @@ def _footer_lines(keyboard_names: Sequence[str] | None) -> list:
     lines = []
     if keyboard_names:
         lines.append((
-            f"Keyboard detected ({keyboard_names[0]}) \u2014 press Esc during a movie to stop and return here",
+            f"Keyboard detected ({keyboard_names[0]}) \u2014 press Esc to quit the player and reach the login prompt",
             _HINT_FOUND_COLOR,
         ))
     elif keyboard_names is not None:
         lines.append((
-            "No keyboard detected \u2014 plug in a USB keyboard to use Esc to stop a movie",
+            "No keyboard detected \u2014 plug in a USB keyboard to use Esc to quit the player",
             _HINT_MISSING_COLOR,
         ))
     return lines

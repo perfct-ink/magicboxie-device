@@ -288,7 +288,7 @@ async def _run_status_message(controller: PlaybackController, stop_event: asynci
 
 
 async def _run_keyboard(controller: PlaybackController, stop_event: asyncio.Event) -> None:
-    """Escape-to-stop from a directly-attached USB keyboard - the device's
+    """Escape-to-quit from a directly-attached USB keyboard - the device's
     only local input, independent of BLE/HTTP and the iOS app. Runs in both
     transport modes, and is a no-op if no keyboard is ever attached."""
     from .services.keyboard_service import KeyboardService

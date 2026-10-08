@@ -1,6 +1,8 @@
 """Local input transport: a USB keyboard is the only way to control the
-device without the iOS app, so pressing Escape stops whatever's playing and
-returns to the thumbnail grid. Entirely optional - if no keyboard is
+device without the iOS app, so pressing Escape quits the player app, freeing
+the screen for a console login. systemd only restarts the unit on failure, so
+it stays off until the device reboots or the service is started by hand.
+Entirely optional - if no keyboard is
 attached, this just periodically finds nothing and does nothing.
 
 Devices are (re)scanned on an interval rather than once at startup so a
@@ -28,8 +30,10 @@ class KeyboardService:
         self._watched_paths: Set[str] = set()
         self._watch_tasks: Set[asyncio.Task] = set()
         self._names: Dict[str, str] = {}
+        self._stop_event = None
 
     async def run(self, stop_event: asyncio.Event) -> None:
+        self._stop_event = stop_event
         try:
             while not stop_event.is_set():
                 before = list(self._controller.keyboard_names)
@@ -49,7 +53,7 @@ class KeyboardService:
         try:
             import evdev
         except ImportError:
-            logger.warning("evdev not installed - keyboard Escape-to-stop is disabled")
+            logger.warning("evdev not installed - keyboard Escape-to-quit is disabled")
             return
 
         try:
@@ -92,8 +96,8 @@ class KeyboardService:
                 # though only Escape actually does something.
                 self._controller.last_input_at = time.monotonic()
                 if event.code == evdev.ecodes.KEY_ESC:
-                    logger.info("Escape pressed - stopping playback")
-                    await self._controller.stop_and_show_idle_screen()
+                    logger.info("Escape pressed - quitting the player app")
+                    self._stop_event.set()
         except OSError:
             # Most likely unplugged - drop it so a later rescan can pick it
             # back up if it's reconnected (possibly at a different path).

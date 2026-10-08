@@ -248,6 +248,14 @@ tries for the first 30 seconds at idle priority, and never delays playback.
 A pending update installs only when nothing is playing, then the daemon
 restarts and resumes again.
 
+## Escape on the device keyboard
+
+Pressing Escape on a USB keyboard attached to the device quits the player app
+cleanly (exit code 0), which frees the HDMI screen for a console login. The
+service uses `Restart=on-failure`, so systemd does not bring it back. It stays
+off, with the web page, BLE and mDNS, until the next reboot or a manual
+`sudo systemctl start magicboxie-player`. A later self-update also restarts it.
+
 ## Self-update lifecycle
 
 The same `magicboxie-self-update.service` handles the request after saved
