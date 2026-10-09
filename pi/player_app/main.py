@@ -219,7 +219,7 @@ async def _run_mdns(stop_event: asyncio.Event) -> None:
 
 async def _run_library_scan(controller: PlaybackController, stop_event: asyncio.Event,
                             startup_decided: asyncio.Event, *, prepared: bool = False) -> None:
-    """Scan without blocking transports, then autoplay unless input arrived.
+    """Scan without blocking transports, then resume the last movie unless input arrived.
 
     The idle screen is not drawn at startup: rendering it competes for the
     weak CPU with the resume of the previous movie, which is what should
@@ -234,7 +234,7 @@ async def _run_library_scan(controller: PlaybackController, stop_event: asyncio.
         while not stop_event.is_set() and await run_io(read_status) is not None:
             await sleep_unless_stopped(stop_event, 1)
         if not stop_event.is_set():
-            await controller.start_random_playback()
+            await controller.resume_on_startup()
     finally:
         startup_decided.set()
     if controller.is_idle and not stop_event.is_set():

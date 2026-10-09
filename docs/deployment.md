@@ -243,7 +243,7 @@ update processes to the daemon through small JSON status files
 The last played movie and its exact position are kept whether it was playing,
 paused or stopped (by the web page, the app or Escape), and across updates and
 reboots. Only a movie that played to its end, failed, or no longer exists is
-forgotten; the device then starts a random one.
+forgotten; the device then starts on the idle screen.
 
 After a reboot the daemon resumes the last movie at its saved position as
 fast as it can. It does not draw the idle screen at startup, since rendering

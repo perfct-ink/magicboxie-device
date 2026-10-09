@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import random
 import time
 from pathlib import Path
 from typing import List, Optional
@@ -47,7 +46,6 @@ class PlaybackController:
         raw_positions = read_dict(self._positions_path) if self._positions_path else {}
         self._positions = {key: value for key, value in raw_positions.items()
                            if key.isdecimal() and type(value) is int and 0 <= value <= 0xFFFFFFFF}
-        self._failed_movie_ids = set()
         self._software_update_phase = None
 
         # Set/cleared by TranscodeService, read by ble_service.py's status
@@ -137,7 +135,6 @@ class PlaybackController:
                 return
             await self._remember_position()
             self._current_movie_id = cmd.argument
-            self._failed_movie_ids.discard(cmd.argument)
             await self.player.load(self.library.playable_path_for(cmd.argument),
                                    start_seconds=self._resume_position(cmd.argument))
             await self.player.hide_pause_icon()
@@ -227,36 +224,18 @@ class PlaybackController:
         await self.player.set_dim(0)
         await self._show_idle_screen_locked()
 
-    async def start_random_playback(self) -> None:
-        """Start once the library is ready, unless startup input took priority.
-        Continues whatever was playing before the device last stopped (power
-        loss, reboot, update restart) at its saved position; only picks a
-        random movie when nothing was playing then."""
+    async def resume_on_startup(self) -> None:
+        """Once the library is ready, unless startup input took priority,
+        continue whatever was playing before the device last stopped (power
+        loss, reboot, update restart) at its saved position. With nothing to
+        continue, show the idle screen rather than picking a movie."""
         async with self._lock:
             if self.last_input_at != self._startup_input_at or not self.is_idle:
                 return
             if await self.restore_last_playback():
                 return
             await run_io(self._clear_playback_state)
-            if not await self._play_random_movie():
-                await self._show_idle_screen_locked()
-
-    async def _play_random_movie(self, exclude_id: Optional[int] = None) -> bool:
-        self._software_update_phase = await run_io(read_status)
-        if self._software_update_phase is not None:
-            return False
-        candidates = [movie for movie in self.movies
-                      if movie.id != exclude_id and movie.id not in self._failed_movie_ids]
-        if not candidates:
-            return False
-        movie = random.choice(candidates)
-        self._current_movie_id = movie.id
-        position = self._resume_position(movie.id)
-        await self.player.load(self.library.playable_path_for(movie.id), start_seconds=position)
-        await self.player.hide_pause_icon()
-        await self.player.set_dim(0)
-        await run_io(self._save_playback_state, movie.id, position, False)
-        return True
+            await self._show_idle_screen_locked()
 
     async def refresh_status(self) -> PlaybackState:
         async with self._lock:
@@ -286,21 +265,18 @@ class PlaybackController:
                 await self.player.load(self.library.playable_path_for(failed_id),
                                        start_seconds=self._resume_position(failed_id))
             else:
-                self._failed_movie_ids.add(failed_id)
-                logger.warning("Skipping movie %s after playback failure", failed_id)
-                if not await self._play_random_movie(exclude_id=failed_id):
-                    self._current_movie_id = None
-                    await self._stop_and_show_idle_screen()
-                    return PlaybackState.idle()
+                logger.warning("Stopping movie %s after playback failure", failed_id)
+                self._current_movie_id = None
+                await self._stop_and_show_idle_screen()
+                return PlaybackState.idle()
 
         if self.player.finished:
             previous_movie_id = self._current_movie_id
             await run_io(self._set_position, previous_movie_id, 0)
-            # Do not save the last frame again if there is no next movie.
+            # Do not save the last frame again; return to the idle screen.
             self._current_movie_id = None
-            if not await self._play_random_movie(exclude_id=previous_movie_id):
-                await self._stop_and_show_idle_screen()
-                return PlaybackState.idle()
+            await self._stop_and_show_idle_screen()
+            return PlaybackState.idle()
 
         idle = await self.player.get_idle()
         if idle:

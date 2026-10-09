@@ -312,8 +312,7 @@ def test_startup_continues_the_saved_movie_at_its_position(tmp_path):
     async def scenario():
         player = FakeMpv()
         controller = PlaybackController(FakeLibrary(), player, state_path)
-        with patch("player_app.controllers.playback_controller.random.choice", side_effect=lambda movies: movies[-1]):
-            await controller.start_random_playback()
+        await controller.resume_on_startup()
         assert player.loaded_path == FakeLibrary().path_for(0)
         assert player.position == 50
         assert player.paused
@@ -321,16 +320,16 @@ def test_startup_continues_the_saved_movie_at_its_position(tmp_path):
     asyncio.run(scenario())
 
 
-def test_startup_plays_a_random_movie_when_nothing_was_playing(tmp_path):
+def test_startup_shows_idle_screen_when_nothing_was_playing(tmp_path):
     state_path = tmp_path / "state.json"
 
     async def scenario():
         player = FakeMpv()
         controller = PlaybackController(FakeLibrary(), player, state_path)
-        with patch("player_app.controllers.playback_controller.random.choice", side_effect=lambda movies: movies[-1]):
-            await controller.start_random_playback()
-        assert player.loaded_path == FakeLibrary().path_for(1)
-        assert not player.paused
+        await controller.resume_on_startup()
+        assert controller.is_idle
+        assert player.loaded_path is None
+        assert player.shown_image_path is not None
 
     asyncio.run(scenario())
 
@@ -342,7 +341,7 @@ def test_startup_input_prevents_autoplay():
             controller = PlaybackController(FakeLibrary(), player)
             await controller.handle_command(Command(opcode=opcode, argument=0))
             previous_path = player.loaded_path
-            await controller.start_random_playback()
+            await controller.resume_on_startup()
             assert player.loaded_path == previous_path
             if opcode == Opcode.PAUSE:
                 assert player.paused
@@ -350,33 +349,11 @@ def test_startup_input_prevents_autoplay():
     asyncio.run(scenario())
 
 
-def test_finished_movie_advances_without_repeating_and_persists(tmp_path):
+def test_finished_movie_stops_instead_of_playing_another():
     async def scenario():
         player = FakeMpv()
-        state_path = tmp_path / "state.json"
-        controller = PlaybackController(FakeLibrary(), player, state_path)
+        controller = PlaybackController(FakeLibrary(), player)
         await controller.handle_command(Command(opcode=Opcode.SELECT_MOVIE, argument=0))
-        for expected_id in (1, 0, 1):
-            player.idle = True
-            player.finished = True
-            # Concurrent transport and background polling must advance just once.
-            states = await asyncio.gather(controller.refresh_status(), controller.refresh_status())
-            assert all(state.movie_id == expected_id for state in states)
-            assert json.loads(state_path.read_text())["movie_id"] == expected_id
-
-    asyncio.run(scenario())
-
-
-def test_single_movie_stops_instead_of_repeating():
-    class SingleMovieLibrary(FakeLibrary):
-        @property
-        def movies(self):
-            return super().movies[:1]
-
-    async def scenario():
-        player = FakeMpv()
-        controller = PlaybackController(SingleMovieLibrary(), player)
-        await controller.start_random_playback()
         player.finished = True
         player.idle = True
         state = await controller.refresh_status()
@@ -395,14 +372,14 @@ def test_empty_library_stays_idle():
     async def scenario():
         player = FakeMpv()
         controller = PlaybackController(EmptyLibrary(), player)
-        await controller.start_random_playback()
+        await controller.resume_on_startup()
         assert controller.is_idle
         assert player.loaded_path is None
 
     asyncio.run(scenario())
 
 
-def test_background_playback_advances_without_transport_requests():
+def test_background_playback_stops_finished_movie_without_transport_requests():
     from player_app.main import _run_playback
 
     async def scenario():
@@ -418,7 +395,8 @@ def test_background_playback_advances_without_transport_requests():
 
         with patch("player_app.main.sleep_unless_stopped", side_effect=finish_polling):
             await _run_playback(controller, stop)
-        assert player.loaded_path == FakeLibrary().path_for(1)
+        assert controller.is_idle
+        assert player.shown_image_path is not None
 
     asyncio.run(scenario())
 
@@ -453,7 +431,7 @@ def test_stop_remembers_position_across_restart(tmp_path):
     asyncio.run(scenario())
 
 
-def test_finish_clears_bookmark_and_bad_movie_is_not_retried(tmp_path):
+def test_finish_clears_bookmark_and_failed_movie_stops(tmp_path):
     async def scenario():
         player = FakeMpv()
         controller = PlaybackController(FakeLibrary(), player, tmp_path / "state.json")
@@ -463,12 +441,13 @@ def test_finish_clears_bookmark_and_bad_movie_is_not_retried(tmp_path):
         player.finished = True
         await controller.refresh_status()
         assert controller._positions["0"] == 0
-        player.failed = True
-        await controller.refresh_status()
-        assert player.loaded_path == FakeLibrary().path_for(0)
-        player.finished = True
-        await controller.refresh_status()
         assert controller.is_idle
+        await controller.handle_command(Command(Opcode.SELECT_MOVIE, 1))
+        player.failed = True
+        state = await controller.refresh_status()
+        assert state.status == PlaybackStatus.STOPPED
+        assert controller.is_idle
+        assert player.shown_image_path is not None
     asyncio.run(scenario())
 
 

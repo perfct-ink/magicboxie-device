@@ -256,9 +256,9 @@ Startup and recovery:
 
 - Startup lists movies without running ffprobe or ffmpeg. Durations are cached by file size and modification time; missing metadata and thumbnails are filled in after playback stops.
 - Downloads, uploads, thumbnails, metadata, and playback state use temporary files and atomic replacement. Completed writes are synced to disk. Startup removes abandoned partial files.
-- Playback failures quarantine the rejected file with a `.corrupt` suffix. A failed optimized copy falls back to the original; a failed original is excluded so another movie can play. Quarantined files remain available for inspection.
-- Each movie keeps its own resume position, checkpointed every five seconds and saved immediately on Stop and movie changes. Natural completion clears that movie's position. Startup still chooses randomly and honors input received during startup.
-- HTTP `update_status` and BLE characteristic `...000000000009` report a UTF-8 update message (empty BLE value / null HTTP field when inactive). Software updates wait for the current movie to finish and suppress autoplay until installation ends. The iOS app displays this over either transport.
+- Playback failures quarantine the rejected file with a `.corrupt` suffix. A failed optimized copy falls back to the original; a failed original stops playback and returns to the idle screen. Quarantined files remain available for inspection.
+- Each movie keeps its own resume position, checkpointed every five seconds and saved immediately on Stop and movie changes. Natural completion clears that movie's position and returns to the idle screen; nothing plays next automatically. Startup resumes only the saved movie, never a random one, and honors input received during startup.
+- HTTP `update_status` and BLE characteristic `...000000000009` report a UTF-8 update message (empty BLE value / null HTTP field when inactive). Software updates wait for the current movie to finish and suppress startup resume until installation ends. The iOS app displays this over either transport.
 - The updater records the successfully installed revision separately from Git HEAD, so an interrupted installation is retried. Its live status belongs to the updater process and expires rather than leaving a permanent updating indication after a crash.
 
 Background scheduling:
