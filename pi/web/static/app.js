@@ -146,8 +146,8 @@ function pollStatus() {
 document.addEventListener('visibilitychange', () => {if (!document.hidden) status();});
 load().then(status); pollStatus();
 
-// ---- Settings (gear): device details and reboot ----
-let settingsTimer = null;
+// ---- Settings (gear): Controls, Logs and Info tabs ----
+let settingsTimer = null, settingsTab = 'controls';
 const dur = s => {
   const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
   return (d ? d + 'd ' : '') + (h || d ? h + 'h ' : '') + m + 'm';
@@ -164,8 +164,84 @@ function section(title, rows) {
   }
   box.append(h, dl); return box;
 }
-function renderSettings(info) {
-  const body = $('settingsBody'); body.replaceChildren();
+function tabRow(items, current, pick, className) {
+  const tabs = document.createElement('div'); tabs.className = className;
+  for (const [key, label] of items) {
+    const tab = document.createElement('button'); tab.className = 'btn small' + (key === current ? '' : ' grey'); tab.textContent = label;
+    tab.addEventListener('click', () => pick(key)); tabs.append(tab);
+  }
+  return tabs;
+}
+function openSettings(tab) {
+  if (typeof tab === 'string') settingsTab = tab;
+  clearInterval(settingsTimer);
+  const panel = $('panel'); panel.replaceChildren();
+  const body = document.createElement('div'); body.className = 'body';
+  const h = document.createElement('h3'); h.textContent = 'Device settings';
+  const tabs = tabRow([['controls', 'Controls'], ['logs', 'Logs'], ['info', 'Info']], settingsTab, openSettings, 'tabs settings-tabs');
+  const content = document.createElement('div');
+  const close = document.createElement('button'); close.className = 'btn grey'; close.textContent = 'Close';
+  close.addEventListener('click', closeSheet);
+  const row = document.createElement('div'); row.className = 'row';
+  if (settingsTab === 'logs') buildLogs(content, row);
+  else if (settingsTab === 'info') buildInfo(content);
+  else buildControls(content, row);
+  row.append(close); body.append(h, tabs, content, row); panel.append(body);
+  $('sheet').classList.remove('hidden');
+}
+
+// Controls: Wi-Fi networks, reboot and shut down.
+function buildControls(content, row) {
+  const note = document.createElement('p'); note.className = 'meta';
+  const wifi = document.createElement('div'); wifi.className = 'info';
+  const wh = document.createElement('h4'); wh.textContent = 'Saved Wi-Fi networks';
+  const saved = document.createElement('p'); saved.className = 'meta'; saved.textContent = 'Loading…';
+  const ssid = document.createElement('input'); ssid.placeholder = 'Network name (e.g. your iPhone)'; ssid.autocapitalize = 'off'; ssid.autocomplete = 'off';
+  const pass = document.createElement('input'); pass.type = 'password'; pass.placeholder = 'Password (blank for an open network)'; pass.autocomplete = 'off';
+  const add = document.createElement('button'); add.className = 'btn grey small'; add.textContent = 'Save network';
+  const loadSaved = async () => {
+    try {const r = await api('/api/wifi/networks'); saved.textContent = r.networks.length ? r.networks.join(', ') : 'None saved';}
+    catch (error) {saved.textContent = error.message;}
+  };
+  add.addEventListener('click', async () => {
+    if (!ssid.value) {note.textContent = 'Enter the network name.'; return;}
+    try {
+      await api('/api/wifi/networks', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ssid: ssid.value, password: pass.value})});
+      note.textContent = 'Saved. Turn that network on, then tap Find Wi-Fi networks.';
+      ssid.value = ''; pass.value = ''; loadSaved();
+    } catch (error) {note.textContent = error.message;}
+  });
+  wifi.append(wh, saved, ssid, pass, add); loadSaved();
+  const search = document.createElement('button'); search.className = 'btn grey'; search.textContent = 'Find Wi-Fi networks';
+  search.addEventListener('click', async () => {
+    if (!confirm('Search for saved Wi-Fi networks for 30 seconds? The MagicBoxie Player hotspot turns off meanwhile, so this page disconnects. If no network is found the hotspot comes back - reconnect to it then.')) return;
+    try {
+      await api('/api/wifi/search', {method:'POST'});
+      note.textContent = 'Searching for networks for 30 seconds… the hotspot is off. It returns if none is found.';
+    } catch (error) {note.textContent = error.message;}
+  });
+  const reboot = document.createElement('button'); reboot.className = 'btn danger'; reboot.textContent = 'Reboot device';
+  reboot.addEventListener('click', async () => {
+    if (!confirm('Reboot the device? Playback stops and the device is unavailable for about a minute.')) return;
+    try {
+      await api('/api/reboot', {method:'POST'});
+      note.textContent = 'Rebooting… this page reconnects when the device is back.';
+    } catch (error) {note.textContent = error.message;}
+  });
+  const shutdown = document.createElement('button'); shutdown.className = 'btn danger'; shutdown.textContent = 'Shut down';
+  shutdown.addEventListener('click', async () => {
+    if (!confirm('Shut down the device? It stays off until it is unplugged and plugged back in.')) return;
+    try {
+      await api('/api/shutdown', {method:'POST'});
+      note.textContent = 'Shutting down… wait for the activity light to stop before unplugging.';
+    } catch (error) {note.textContent = error.message;}
+  });
+  content.append(wifi, note); row.append(search, reboot, shutdown);
+}
+
+// Info: device details, refreshed every 5 seconds while the tab is open.
+function renderInfo(body, info) {
+  body.replaceChildren();
   const ips = (info.addresses || []).map(a => a.address + ' (' + a.interface + ')').join(', ') || info.ip_address;
   const conns = (info.connections || []).map(c => c.name + ' · ' + c.type).join(', ');
   const mem = info.memory_mb ? (info.memory_mb.total - info.memory_mb.available) + ' / ' + info.memory_mb.total + ' MB used' : null;
@@ -197,98 +273,36 @@ function renderSettings(info) {
     ]),
   );
 }
-async function refreshSettings() {
-  try {renderSettings(await api('/api/info'));}
-  catch (error) {$('settingsBody').textContent = 'Could not load device details: ' + error.message;}
-}
-function openSettings() {
-  const panel = $('panel'); panel.replaceChildren();
-  const body = document.createElement('div'); body.className = 'body';
-  const h = document.createElement('h3'); h.textContent = 'Device settings';
-  const details = document.createElement('div'); details.id = 'settingsBody'; details.textContent = 'Loading…';
-  const note = document.createElement('p'); note.id = 'settingsNote'; note.className = 'meta';
-  const row = document.createElement('div'); row.className = 'row';
-  const reboot = document.createElement('button'); reboot.className = 'btn danger'; reboot.textContent = 'Reboot device';
-  reboot.addEventListener('click', async () => {
-    if (!confirm('Reboot the device? Playback stops and the device is unavailable for about a minute.')) return;
-    try {
-      await api('/api/reboot', {method:'POST'});
-      note.textContent = 'Rebooting… this page reconnects when the device is back.';
-    } catch (error) {note.textContent = error.message;}
-  });
-  const wifi = document.createElement('div'); wifi.className = 'info';
-  const wh = document.createElement('h4'); wh.textContent = 'Saved Wi-Fi networks';
-  const saved = document.createElement('p'); saved.className = 'meta'; saved.textContent = 'Loading…';
-  const ssid = document.createElement('input'); ssid.placeholder = 'Network name (e.g. your iPhone)'; ssid.autocapitalize = 'off'; ssid.autocomplete = 'off';
-  const pass = document.createElement('input'); pass.type = 'password'; pass.placeholder = 'Password (blank for an open network)'; pass.autocomplete = 'off';
-  const add = document.createElement('button'); add.className = 'btn grey small'; add.textContent = 'Save network';
-  const loadSaved = async () => {
-    try {const r = await api('/api/wifi/networks'); saved.textContent = r.networks.length ? r.networks.join(', ') : 'None saved';}
-    catch (error) {saved.textContent = error.message;}
+function buildInfo(content) {
+  content.textContent = 'Loading…';
+  const refresh = async () => {
+    try {renderInfo(content, await api('/api/info'));}
+    catch (error) {content.textContent = 'Could not load device details: ' + error.message;}
   };
-  add.addEventListener('click', async () => {
-    if (!ssid.value) {note.textContent = 'Enter the network name.'; return;}
-    try {
-      await api('/api/wifi/networks', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ssid: ssid.value, password: pass.value})});
-      note.textContent = 'Saved. Turn that network on, then tap Find Wi-Fi networks.';
-      ssid.value = ''; pass.value = ''; loadSaved();
-    } catch (error) {note.textContent = error.message;}
-  });
-  wifi.append(wh, saved, ssid, pass, add); loadSaved();
-  const search = document.createElement('button'); search.className = 'btn grey'; search.textContent = 'Find Wi-Fi networks';
-  search.addEventListener('click', async () => {
-    if (!confirm('Search for saved Wi-Fi networks for 30 seconds? The MagicBoxie Player hotspot turns off meanwhile, so this page disconnects. If no network is found the hotspot comes back - reconnect to it then.')) return;
-    try {
-      await api('/api/wifi/search', {method:'POST'});
-      note.textContent = 'Searching for networks for 30 seconds… the hotspot is off. It returns if none is found.';
-    } catch (error) {note.textContent = error.message;}
-  });
-  const shutdown = document.createElement('button'); shutdown.className = 'btn danger'; shutdown.textContent = 'Shut down';
-  shutdown.addEventListener('click', async () => {
-    if (!confirm('Shut down the device? It stays off until it is unplugged and plugged back in.')) return;
-    try {
-      await api('/api/shutdown', {method:'POST'});
-      note.textContent = 'Shutting down… wait for the activity light to stop before unplugging.';
-    } catch (error) {note.textContent = error.message;}
-  });
-  const logsButton = document.createElement('button'); logsButton.className = 'btn grey'; logsButton.textContent = 'Logs';
-  logsButton.addEventListener('click', openLogs);
-  const close = document.createElement('button'); close.className = 'btn grey'; close.textContent = 'Close';
-  close.addEventListener('click', closeSheet);
-  row.append(logsButton, search, reboot, shutdown, close); body.append(h, details, wifi, note, row); panel.append(body);
-  $('sheet').classList.remove('hidden');
-  refreshSettings(); clearInterval(settingsTimer); settingsTimer = setInterval(() => {if (!document.hidden) refreshSettings();}, 5000);
+  refresh(); settingsTimer = setInterval(() => {if (!document.hidden) refresh();}, 5000);
 }
-// ---- Logs: this boot's Player, Wi-Fi and Update logs (times are seconds since boot) ----
+
+// Logs: this boot's Player, Wi-Fi and Update logs (times are seconds since boot).
 let logSource = 'wifi';
-async function refreshLogs() {
-  const out = $('logsBody'), info = $('logsInfo');
-  try {
-    const data = await api('/api/logs?source=' + logSource);
-    info.replaceChildren();
-    if (data.source === 'wifi') {
-      const saved = data.saved_networks ? data.saved_networks.join(', ') || 'None' : 'Could not read';
-      const profiles = (data.wifi_profiles || []).map(p => p.name + (p.autoconnect ? '' : ' (no autoconnect)')).join(', ') || 'None';
-      const visible = (data.in_range || []).map(n => n.ssid + ' (' + n.signal + '%)').join(', ') || 'None seen (no scan while the hotspot is on)';
-      info.append(section('Wi-Fi', [['Saved networks', saved], ['NetworkManager profiles', profiles],
-        ['Wi-Fi adapter', data.adapter], ['In range', visible]]));
-    }
-    out.textContent = data.journal; out.scrollTop = out.scrollHeight;
-  } catch (error) {out.textContent = 'Could not load logs: ' + error.message;}
-}
-function openLogs() {
-  clearInterval(settingsTimer);
-  const panel = $('panel'); panel.replaceChildren();
-  const body = document.createElement('div'); body.className = 'body';
-  const h = document.createElement('h3'); h.textContent = 'Logs';
-  const tabs = document.createElement('div'); tabs.className = 'tabs';
-  for (const [source, label] of [['player', 'Player'], ['wifi', 'Wi-Fi'], ['update', 'Updates']]) {
-    const tab = document.createElement('button'); tab.className = 'btn small' + (source === logSource ? '' : ' grey'); tab.textContent = label;
-    tab.addEventListener('click', () => {logSource = source; openLogs();}); tabs.append(tab);
-  }
-  const info = document.createElement('div'); info.id = 'logsInfo';
-  const out = document.createElement('pre'); out.id = 'logsBody'; out.className = 'logs'; out.textContent = 'Loading…';
-  const row = document.createElement('div'); row.className = 'row';
+function buildLogs(content, row) {
+  const sources = tabRow([['player', 'Player'], ['wifi', 'Wi-Fi'], ['update', 'Updates']], logSource,
+    source => {logSource = source; openSettings('logs');}, 'tabs log-sources');
+  const info = document.createElement('div');
+  const out = document.createElement('pre'); out.className = 'logs'; out.textContent = 'Loading…';
+  const refreshLogs = async () => {
+    try {
+      const data = await api('/api/logs?source=' + logSource);
+      info.replaceChildren();
+      if (data.source === 'wifi') {
+        const saved = data.saved_networks ? data.saved_networks.join(', ') || 'None' : 'Could not read';
+        const profiles = (data.wifi_profiles || []).map(p => p.name + (p.autoconnect ? '' : ' (no autoconnect)')).join(', ') || 'None';
+        const visible = (data.in_range || []).map(n => n.ssid + ' (' + n.signal + '%)').join(', ') || 'None seen (no scan while the hotspot is on)';
+        info.append(section('Wi-Fi', [['Saved networks', saved], ['NetworkManager profiles', profiles],
+          ['Wi-Fi adapter', data.adapter], ['In range', visible]]));
+      }
+      out.textContent = data.journal; out.scrollTop = out.scrollHeight;
+    } catch (error) {out.textContent = 'Could not load logs: ' + error.message;}
+  };
   const refresh = document.createElement('button'); refresh.className = 'btn'; refresh.textContent = 'Refresh';
   refresh.addEventListener('click', refreshLogs);
   const copy = document.createElement('button'); copy.className = 'btn grey'; copy.textContent = 'Copy';
@@ -296,10 +310,7 @@ function openLogs() {
     try {await navigator.clipboard.writeText(out.textContent); copy.textContent = 'Copied';}
     catch {const range = document.createRange(); range.selectNodeContents(out); getSelection().removeAllRanges(); getSelection().addRange(range); copy.textContent = 'Selected';}
   });
-  const back = document.createElement('button'); back.className = 'btn grey'; back.textContent = 'Back';
-  back.addEventListener('click', openSettings);
-  row.append(refresh, copy, back); body.append(h, tabs, info, out, row); panel.append(body);
-  $('sheet').classList.remove('hidden'); refreshLogs();
+  content.append(sources, info, out); row.append(refresh, copy); refreshLogs();
 }
 $('gear').addEventListener('click', openSettings);
 $('busy').addEventListener('click', openSettings);
