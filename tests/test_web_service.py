@@ -859,3 +859,53 @@ def test_wifi_networks_can_be_saved_and_listed_without_passwords(tmp_path):
 
     from player_app.wifi_networks import load_networks, save_network
     assert asyncio.run(scenario()) == (400, 400, 200, {"networks": ["My iPhone"]})
+
+
+def test_activity_reports_downloads_transcodes_and_queues(tmp_path):
+    from player_app.services.home_sync_service import SyncActivity
+
+    async def scenario():
+        library = FakeLibrary(transcode_dir=tmp_path)
+        client, controller = await _make_client(library)
+        controller.currently_syncing_movie_title = "Gamma"
+        controller.currently_transcoding_movie_id = 0
+        controller.transcode_position_seconds = 25.0
+        controller.sync_activity = SyncActivity(
+            queued=["Delta", "Epsilon"], bytes_done=50, bytes_total=200,
+            preparing=[{"title": "Zeta", "status": "transcoding", "progress_percent": 40.0}],
+            reached_at=1.0, reachable=True,
+        )
+        try:
+            resp = await client.get("/api/activity")
+            assert resp.status == 200
+            return await resp.json()
+        finally:
+            await client.close()
+
+    data = asyncio.run(scenario())
+    assert data["downloading"] == {"title": "Gamma", "bytes_done": 50, "bytes_total": 200}
+    assert data["download_queue"] == ["Delta", "Epsilon"]
+    assert data["transcoding"] == {
+        "movie_id": 0, "title": "A", "position_seconds": 25.0, "duration_seconds": 100, "percent": 25.0,
+    }
+    assert data["transcode_queue"] == [{"id": 1, "title": "B"}]
+    assert data["home_server"]["preparing"] == [{"title": "Zeta", "status": "transcoding", "progress_percent": 40.0}]
+    assert data["paused_for_playback"] is False
+
+
+def test_activity_is_empty_when_nothing_is_happening(tmp_path):
+    async def scenario():
+        library = FakeLibrary(transcode_dir=tmp_path)
+        (tmp_path / "0.mp4").write_bytes(b"x")
+        (tmp_path / "1.mp4").write_bytes(b"x")
+        client, _ = await _make_client(library)
+        try:
+            return await (await client.get("/api/activity")).json()
+        finally:
+            await client.close()
+
+    data = asyncio.run(scenario())
+    assert data == {
+        "downloading": None, "download_queue": [], "transcoding": None, "transcode_queue": [],
+        "home_server": None, "paused_for_playback": False,
+    }

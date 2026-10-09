@@ -88,15 +88,17 @@ class TranscodeService:
         tmp_dest = dest.with_suffix(".partial" + dest.suffix)
 
         self._controller.currently_transcoding_movie_id = movie_id
+        self._controller.transcode_position_seconds = 0.0
         logger.info("Transcoding %s", source.name)
         process = await asyncio.create_subprocess_exec(
-            "ffmpeg", "-y", "-loglevel", "error",
+            "ffmpeg", "-y", "-loglevel", "error", "-nostats", "-progress", "pipe:1",
             "-i", str(source),
             *FFMPEG_ENCODE_ARGS,
             str(tmp_dest),
-            stdout=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
+        progress = asyncio.create_task(self._read_progress(process.stdout))
         try:
             while process.returncode is None:
                 if not self._may_run():
@@ -128,5 +130,22 @@ class TranscodeService:
             if process.returncode is None:
                 process.kill()
                 await process.wait()
+            progress.cancel()
+            await asyncio.gather(progress, return_exceptions=True)
             tmp_dest.unlink(missing_ok=True)
             self._controller.currently_transcoding_movie_id = None
+            self._controller.transcode_position_seconds = None
+
+    async def _read_progress(self, stdout) -> None:
+        """ffmpeg's -progress output is key=value lines; out_time_us is how
+        far into the movie the encode has got, for the activity panel."""
+        if stdout is None:
+            return
+        while True:
+            line = await stdout.readline()
+            if not line:
+                return
+            key, _, value = line.decode(errors="replace").strip().partition("=")
+            # Older ffmpeg names it out_time_ms, but it is microseconds too.
+            if key in ("out_time_us", "out_time_ms") and value.isdigit():
+                self._controller.transcode_position_seconds = int(value) / 1_000_000

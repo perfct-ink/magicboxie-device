@@ -53,6 +53,8 @@ class PlaybackController:
         # than a direct dependency between them, mirroring how is_idle
         # already works in the other direction (TranscodeService reads it).
         self.currently_transcoding_movie_id: Optional[int] = None
+        # How far into that movie the encode has got, from ffmpeg -progress.
+        self.transcode_position_seconds: Optional[float] = None
         # Set/cleared by HomeServerSync, read by web_service.py's /api/status
         # - same hub pattern as currently_transcoding_movie_id above. A
         # title, not an id: the movie doesn't have a local id yet while
@@ -62,6 +64,9 @@ class PlaybackController:
         # True while the home server has movies to download and this device
         # is fetching them - TranscodeService yields to it: downloads first.
         self.sync_busy: bool = False
+        # HomeServerSync's SyncActivity (queue, bytes, home server's own
+        # transcodes), set by main.py; None when home sync isn't running.
+        self.sync_activity = None
         # Names of attached keyboards, maintained by KeyboardService and
         # shown in the idle screen's footer hint.
         self.keyboard_names: list[str] = []

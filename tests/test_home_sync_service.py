@@ -403,3 +403,38 @@ def test_busy_is_cleared_even_if_the_check_in_raises(tmp_path):
             pass
 
     assert states[-1] is False
+
+
+def test_check_in_tracks_the_download_queue_and_home_server_preparing(tmp_path):
+    library = _library(tmp_path)
+    queued_at_start = []
+    sync = HomeServerSync(
+        library, BASE_URL, "secret",
+        on_progress=lambda title: title and queued_at_start.append((title, list(sync.activity.queued))),
+    )
+    with aioresponses() as mocked:
+        mocked.post(f"{BASE_URL}/devices/register", payload={
+            "Items": [
+                {"Id": "1", "Name": "Alpha", "MagicBoxieOriginalFilename": "alpha.mp4"},
+                {"Id": "2", "Name": "Beta", "MagicBoxieOriginalFilename": "beta.mp4"},
+            ],
+            "MagicBoxiePreparing": [{"Name": "Gamma", "Status": "transcoding", "ProgressPercent": 42.5}],
+        })
+        mocked.post(f"{BASE_URL}/Users/AuthenticateByName", payload={"AccessToken": "tok123"})
+        mocked.get(f"{BASE_URL}/Videos/1/stream?static=true", body=b"alpha-bytes")
+        mocked.get(f"{BASE_URL}/Videos/2/stream?static=true", body=b"beta-bytes")
+        asyncio.run(sync.check_in())
+
+    assert queued_at_start == [("Alpha", ["Beta"]), ("Beta", [])]
+    assert sync.activity.queued == []
+    assert sync.activity.reachable is True
+    assert sync.activity.preparing == [{"title": "Gamma", "status": "transcoding", "progress_percent": 42.5}]
+
+
+def test_check_in_while_playing_still_lists_what_is_waiting(tmp_path):
+    library = _library(tmp_path)
+    sync = HomeServerSync(library, BASE_URL, "secret", is_idle=lambda: False)
+    with aioresponses() as mocked:
+        mocked.post(f"{BASE_URL}/devices/register", payload={"items": [{"id": "1", "name": "Alpha"}]})
+        asyncio.run(sync.check_in())
+    assert sync.activity.queued == ["Alpha"]

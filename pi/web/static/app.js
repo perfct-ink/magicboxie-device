@@ -114,8 +114,8 @@ async function status() {
     if (previous !== undefined && (previous !== state.transcoding_movie_id || previousSync !== state.syncing_movie_title
         || previousMovie !== playingMovie)) await load();
     const m = movies.find(x => x.id === state.movie_id), active = m && state.status !== 'stopped';
-    // Top-right spinner while the device is downloading from the media
-    // server or transcoding (one movie at a time each).
+    // Top-right spinner while the device downloads or transcodes; tapping it
+    // opens the activity panel (downloads, transcodes and their queues).
     const optimizing = movies.find(x => x.id === state.transcoding_movie_id);
     const busyLabel = state.syncing_movie_title ? 'Downloading ' + state.syncing_movie_title
       : optimizing ? 'Optimizing ' + optimizing.title : 'Optimizing a movie';
@@ -316,7 +316,74 @@ function buildLogs(content, row) {
   content.append(sources, info, out); row.append(refresh, copy); refreshLogs();
 }
 $('gear').addEventListener('click', openSettings);
-$('busy').addEventListener('click', openSettings);
+$('busy').addEventListener('click', openActivity);
+
+// ---- Activity (loading icon): downloads, transcodes and what is queued ----
+let activityTimer = null;
+const mb = b => b >= 1e9 ? (b / 1e9).toFixed(1) + ' GB' : Math.round(b / 1e6) + ' MB';
+const REMOTE_STATUS = {pending: 'Waiting', probing: 'Checking the file', needs_transcode: 'Waiting to transcode', transcoding: 'Transcoding'};
+function activityItem(title, detail, percent) {
+  const row = document.createElement('div'); row.className = 'upl';
+  const label = document.createElement('div'); label.textContent = title + (detail ? ' — ' + detail : '');
+  row.append(label);
+  if (percent != null) {
+    const bar = document.createElement('div'); bar.className = 'bar'; const fill = document.createElement('i');
+    fill.style.width = Math.max(0, Math.min(100, percent)) + '%'; bar.append(fill); row.append(bar);
+  }
+  return row;
+}
+function activityGroup(body, title, rows, empty) {
+  if (!rows.length && !empty) return;
+  const box = document.createElement('div'); box.className = 'info';
+  const h = document.createElement('h4'); h.textContent = title; box.append(h);
+  if (rows.length) box.append(...rows);
+  else {const p = document.createElement('p'); p.className = 'meta'; p.textContent = empty; box.append(p);}
+  body.append(box);
+}
+function renderActivity(a) {
+  const body = $('activityBody'); body.replaceChildren();
+  if (a.paused_for_playback) {
+    const p = document.createElement('p'); p.className = 'meta';
+    p.textContent = 'Paused while a movie plays. Downloads and optimizing pick up again when it stops.'; body.append(p);
+  }
+  const d = a.downloading;
+  const dlPct = d && d.bytes_total ? d.bytes_done / d.bytes_total * 100 : null;
+  const dlDetail = d ? (d.bytes_total ? mb(d.bytes_done) + ' of ' + mb(d.bytes_total) + ' (' + Math.floor(dlPct) + '%)'
+    : d.bytes_done ? mb(d.bytes_done) : 'starting') : '';
+  activityGroup(body, 'Downloading from home server', d ? [activityItem(d.title, dlDetail, dlPct ?? 0)] : [], 'Nothing downloading');
+  activityGroup(body, 'Download queue', a.download_queue.map(t => activityItem(t, 'waiting')));
+  const t = a.transcoding;
+  const tDetail = t ? (t.percent != null ? Math.floor(t.percent) + '% · ' + fmt(t.position_seconds) + ' of ' + fmt(t.duration_seconds)
+    : t.position_seconds ? fmt(t.position_seconds) + ' done' : 'starting') : '';
+  activityGroup(body, 'Optimizing on this player', t ? [activityItem(t.title, tDetail, t.percent ?? 0)] : [], 'Nothing optimizing');
+  activityGroup(body, 'Optimize queue', a.transcode_queue.map(m => activityItem(m.title, 'waiting')));
+  const home = a.home_server;
+  if (home) {
+    const rows = home.preparing.map(m => activityItem(m.title,
+      (REMOTE_STATUS[m.status] || m.status) + (m.progress_percent != null && m.status === 'transcoding' ? ' ' + Math.floor(m.progress_percent) + '%' : ''),
+      m.status === 'transcoding' ? m.progress_percent ?? 0 : null));
+    activityGroup(body, 'Transcoding on home server', rows,
+      home.reachable ? 'Nothing being prepared' : 'Home server not reachable. It is checked when the player is on home Wi-Fi.');
+  }
+}
+async function refreshActivity() {
+  if (!$('activityBody')) {clearInterval(activityTimer); return;}  // sheet now shows something else
+  try {renderActivity(await api('/api/activity'));}
+  catch (error) {$('activityBody').textContent = 'Could not load activity: ' + error.message;}
+}
+function openActivity() {
+  clearInterval(settingsTimer);
+  const panel = $('panel'); panel.replaceChildren();
+  const body = document.createElement('div'); body.className = 'body';
+  const h = document.createElement('h3'); h.textContent = 'Downloads and optimizing';
+  const details = document.createElement('div'); details.id = 'activityBody'; details.textContent = 'Loading…';
+  const row = document.createElement('div'); row.className = 'row';
+  const close = document.createElement('button'); close.className = 'btn grey'; close.textContent = 'Close';
+  close.addEventListener('click', closeSheet);
+  row.append(close); body.append(h, details, row); panel.append(body);
+  $('sheet').classList.remove('hidden');
+  refreshActivity(); clearInterval(activityTimer); activityTimer = setInterval(() => {if (!document.hidden) refreshActivity();}, 3000);
+}
 
 // ---- Upload movies from this browser ----
 function uploadOne(file) {

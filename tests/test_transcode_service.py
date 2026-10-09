@@ -23,6 +23,7 @@ class FakeProcess:
     def __init__(self, returncode=0, stderr=b"", already_exited=True):
         self._final_returncode = returncode
         self.returncode = returncode if already_exited else None
+        self.stdout = None
         self.stderr = AsyncMock()
         self.stderr.read = AsyncMock(return_value=stderr)
         self.terminated = False
@@ -255,3 +256,32 @@ def test_running_transcode_stops_when_a_download_starts(tmp_path):
     process = asyncio.run(scenario())
     assert process.terminated
     assert not (tmp_path / "0.partial.mp4").exists()
+
+
+def test_transcode_reports_ffmpeg_progress_while_running(tmp_path):
+    async def scenario():
+        library = FakeLibrary(transcode_dir=tmp_path)
+        controller = PlaybackController(library, FakeMpv())
+        service = TranscodeService(controller)
+        process = FakeProcess(already_exited=False)
+        process.stdout = asyncio.StreamReader()
+        process.stdout.feed_data(b"frame=10\nout_time_us=N/A\nout_time_us=30000000\nprogress=continue\n")
+        seen = []
+
+        async def fake_exec(*args, **kwargs):
+            return process
+
+        async def finish():
+            for _ in range(50):
+                await asyncio.sleep(0)
+            seen.append(controller.transcode_position_seconds)
+            (tmp_path / "0.partial.mp4").write_bytes(b"encoded")
+            process.terminate()  # exits 0, as if ffmpeg finished
+
+        with patch(_PATCH_TARGET, side_effect=fake_exec):
+            await asyncio.gather(service._transcode(movie_id=0), finish())
+        return seen, controller.transcode_position_seconds
+
+    seen, after = asyncio.run(scenario())
+    assert seen == [30.0]
+    assert after is None

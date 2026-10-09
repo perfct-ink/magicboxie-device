@@ -446,10 +446,12 @@ async def _run_home_sync(controller: PlaybackController, stop_event: asyncio.Eve
         is_idle=lambda: controller.is_idle,
         on_busy=lambda busy: setattr(controller, "sync_busy", busy),
     )
+    controller.sync_activity = sync.activity
     redraw_task = asyncio.create_task(redraw_idle_screen())
     try:
         while not stop_event.is_set():
             if not await host_resolves(HOME_SERVER_URL):
+                sync.activity.reachable = False
                 await sleep_unless_stopped(stop_event, HOME_SERVER_RESOLVE_RETRY_SECONDS)
                 continue
             try:

@@ -88,6 +88,7 @@ def create_app(controller: PlaybackController) -> web.Application:
     app.router.add_post("/api/movies/{id}/thumbnail", _post_thumbnail)
     app.router.add_post("/api/movies/{id}/metadata", _post_metadata)
     app.router.add_get("/api/status", _get_status)
+    app.router.add_get("/api/activity", _get_activity)
     app.router.add_post("/api/command", _post_command)
     app.router.add_get("/api/version", _get_version)
     app.router.add_get("/api/info", _get_info)
@@ -354,6 +355,58 @@ async def _get_status(request: web.Request) -> web.Response:
         "throttled": throttle.throttled if throttle else None,
         "internet_reachable": online,
     })
+
+
+def _activity_payload(controller: PlaybackController) -> dict:
+    """What the loading icon's panel shows: the download in flight and the
+    ones behind it, the transcode in flight and the movies still waiting to
+    be optimized, and what the home server is still preparing."""
+    activity = controller.sync_activity
+    downloading = None
+    if controller.currently_syncing_movie_title:
+        downloading = {
+            "title": controller.currently_syncing_movie_title,
+            "bytes_done": activity.bytes_done if activity else None,
+            "bytes_total": activity.bytes_total if activity else None,
+        }
+
+    transcoding_id = controller.currently_transcoding_movie_id
+    transcoding = None
+    transcode_queue = []
+    for movie in controller.movies:
+        if movie.id == transcoding_id:
+            position = controller.transcode_position_seconds
+            duration = movie.duration_seconds
+            transcoding = {
+                "movie_id": movie.id,
+                "title": movie.title,
+                "position_seconds": position,
+                "duration_seconds": duration,
+                "percent": min(100.0, round(position / duration * 100, 1)) if position is not None and duration else None,
+            }
+        elif not controller.library.transcode_path_for(movie.id).exists():
+            transcode_queue.append({"id": movie.id, "title": movie.title})
+
+    home_server = None
+    if activity is not None:
+        home_server = {
+            "reachable": activity.reachable,
+            "reached_at": activity.reached_at,
+            "preparing": list(activity.preparing),
+        }
+    return {
+        "downloading": downloading,
+        "download_queue": list(activity.queued) if activity else [],
+        "transcoding": transcoding,
+        "transcode_queue": transcode_queue,
+        "home_server": home_server,
+        # Downloads and transcodes both wait while a movie plays.
+        "paused_for_playback": not controller.is_idle,
+    }
+
+
+async def _get_activity(request: web.Request) -> web.Response:
+    return web.json_response(_activity_payload(request.app[_CONTROLLER_KEY]))
 
 
 async def _get_version(request: web.Request) -> web.Response:

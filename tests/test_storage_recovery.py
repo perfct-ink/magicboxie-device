@@ -107,6 +107,7 @@ def test_interrupted_download_never_publishes_movie(tmp_path):
 
     class Response:
         status = 200
+        content_length = None
         content = Content()
         async def __aenter__(self):
             return self

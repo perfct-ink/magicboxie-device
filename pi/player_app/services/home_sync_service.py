@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import logging
 import os
+import time
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, List, Optional
 
@@ -33,6 +35,23 @@ _DOWNLOAD_CHUNK_BYTES = 1024 * 1024
 _READY_STATUS = "ready"
 _USER_ID = "1"  # MagicBoxie-web has one shared login, not per-user accounts
 _TICKS_PER_SECOND = 10_000_000  # Jellyfin's RunTimeTicks unit is 100ns
+
+
+@dataclass
+class SyncActivity:
+    """What the home sync is doing, for the web page's activity panel:
+    the download in flight (title via on_progress, bytes here), the movies
+    waiting behind it, and the home server's own not-yet-ready movies."""
+    # Titles still to download after the current one, in download order.
+    queued: List[str] = field(default_factory=list)
+    bytes_done: int = 0
+    bytes_total: Optional[int] = None
+    # Movies marked for this device that the home server is still
+    # preparing: [{"title", "status", "progress_percent"}].
+    preparing: List[dict] = field(default_factory=list)
+    # time.time() of the last check-in that reached the home server.
+    reached_at: Optional[float] = None
+    reachable: bool = False
 
 
 class HomeServerSync:
@@ -69,6 +88,7 @@ class HomeServerSync:
         # `movies` with no duration/artwork) or missing its title/year/
         # description from the home server indefinitely.
         self._pending_metadata: List[dict] = []
+        self.activity = SyncActivity()
 
     async def check_in(self) -> None:
         try:
@@ -82,14 +102,19 @@ class HomeServerSync:
                 remote_movies = await self._register_and_list_movies(session)
             except (aiohttp.ClientError, TimeoutError) as exc:
                 logger.info("Home server check-in: couldn't list movies (%s)", exc)
+                self.activity.reachable = False
+                self.activity.queued = []
+                self.activity.preparing = []
                 return
+
+            existing_titles = {movie.title for movie in self._library.movies}
+            to_download = [m for m in remote_movies if m["Name"] not in existing_titles]
+            self.activity.queued = [m["Name"] for m in to_download]
 
             # Registration stays live during playback; defer expensive transfers.
             if not self._is_idle():
                 return
 
-            existing_titles = {movie.title for movie in self._library.movies}
-            to_download = [m for m in remote_movies if m["Name"] not in existing_titles]
             if to_download:
                 self._on_busy(True)
             if to_download:
@@ -114,7 +139,7 @@ class HomeServerSync:
                     # ever tracks a single in-flight title - downloading
                     # several concurrently would also just contend with each
                     # other for the same bandwidth with nothing gained.
-                    for movie in to_download:
+                    for index, movie in enumerate(to_download):
                         if not self._is_idle():
                             # Playback started partway through this cycle -
                             # let whatever's already mid-download finish
@@ -122,12 +147,16 @@ class HomeServerSync:
                             # pure waste) but don't start any more.
                             logger.info("Home server check-in: pausing further downloads - playback started")
                             break
+                        self.activity.queued = [m["Name"] for m in to_download[index + 1:]]
                         self._on_progress(movie["Name"])
                         try:
                             if await self._download_movie(session, movie, headers):
                                 self._pending_metadata.append(movie)
                         finally:
+                            self.activity.bytes_done, self.activity.bytes_total = 0, None
                             self._on_progress(None)
+                    else:
+                        self.activity.queued = []
 
             if not self._pending_metadata:
                 if not to_download:
@@ -153,6 +182,14 @@ class HomeServerSync:
                 if resp.status == 200:
                     data = await resp.json()
                     items = data.get("items") or data.get("Items") or []
+                    self._reached([
+                        {
+                            "title": item.get("Name") or "",
+                            "status": item.get("Status") or "",
+                            "progress_percent": item.get("ProgressPercent"),
+                        }
+                        for item in data.get("MagicBoxiePreparing") or []
+                    ])
                     return [self._normalize_registered_movie(item) for item in items]
                 logger.info("Home server check-in: registration endpoint responded HTTP %d", resp.status)
         except (aiohttp.ClientError, TimeoutError, ValueError) as exc:
@@ -162,7 +199,14 @@ class HomeServerSync:
         if token is None:
             return []
         headers = {"Authorization": f"Bearer {token}"}
-        return await self._list_ready_movies(session, headers)
+        movies = await self._list_ready_movies(session, headers)
+        self._reached([])
+        return movies
+
+    def _reached(self, preparing: List[dict]) -> None:
+        self.activity.reachable = True
+        self.activity.reached_at = time.time()
+        self.activity.preparing = preparing
 
     async def _authenticate(self, session: aiohttp.ClientSession):
         try:
@@ -209,9 +253,11 @@ class HomeServerSync:
                 if resp.status != 200:
                     logger.warning("Home server check-in: download of %r failed (HTTP %d)", movie["Name"], resp.status)
                     return False
+                self.activity.bytes_done, self.activity.bytes_total = 0, resp.content_length
                 with temporary.open("wb") as f:
                     async for chunk in resp.content.iter_chunked(_DOWNLOAD_CHUNK_BYTES):
                         await run_io(f.write, chunk)
+                        self.activity.bytes_done += len(chunk)
                 if temporary.stat().st_size == 0:
                     return False
                 await run_io(publish_file, temporary, dest_path)
