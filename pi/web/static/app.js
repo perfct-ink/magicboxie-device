@@ -104,19 +104,22 @@ function startTicker(m) {
 }
 async function status() {
   try {
-    const previous = state.transcoding_movie_id, previousMovie = state.status === 'stopped' ? null : state.movie_id;
+    const previous = state.transcoding_movie_id, previousSync = state.syncing_movie_title, previousMovie = state.status === 'stopped' ? null : state.movie_id;
     state = await api('/api/status'); $('conn').textContent = 'Connected';
     stopTicker();
-    // A transcode started or finished: reload so "Queued" badges are current.
-    // Same when the movie playing changes or stops, so its saved position
-    // (the progress bar under it) is current.
+    // A transcode or download started or finished: reload so "Queued" badges
+    // and the list are current. Same when the movie playing changes or
+    // stops, so its saved position (the progress bar under it) is current.
     const playingMovie = state.status === 'stopped' ? null : state.movie_id;
-    if (previous !== undefined && (previous !== state.transcoding_movie_id || previousMovie !== playingMovie)) await load();
+    if (previous !== undefined && (previous !== state.transcoding_movie_id || previousSync !== state.syncing_movie_title
+        || previousMovie !== playingMovie)) await load();
     const m = movies.find(x => x.id === state.movie_id), active = m && state.status !== 'stopped';
-    // Top-right spinner while the device is transcoding (one movie at a time).
+    // Top-right spinner while the device is downloading from the media
+    // server or transcoding (one movie at a time each).
     const optimizing = movies.find(x => x.id === state.transcoding_movie_id);
-    const busyLabel = optimizing ? 'Optimizing ' + optimizing.title : 'Optimizing a movie';
-    $('busy').classList.toggle('hidden', state.transcoding_movie_id == null);
+    const busyLabel = state.syncing_movie_title ? 'Downloading ' + state.syncing_movie_title
+      : optimizing ? 'Optimizing ' + optimizing.title : 'Optimizing a movie';
+    $('busy').classList.toggle('hidden', state.transcoding_movie_id == null && !state.syncing_movie_title);
     $('busy').title = busyLabel; $('busy').setAttribute('aria-label', busyLabel);
     $('bar').classList.toggle('hidden', !active); $('hero').classList.toggle('hidden', !active);
     if (active) {
