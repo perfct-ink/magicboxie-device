@@ -1,6 +1,6 @@
 IMAGE := magicboxie-player
 MOVIES_DIR := movies
-.PHONY: all setup dev build test clean seed-movies pi
+.PHONY: all setup dev build test clean seed-movies pi pi-ssh-deploy pi-ssh-logs
 
 all: dev
 
@@ -63,3 +63,23 @@ pi:
 
 pi-%:
 	@$(MAKE) -C pi $*
+
+# Deploy from this machine: SSH to the Pi and run `make deploy` in its checkout.
+# The Pi pulls from origin, so push your commits first - this refuses to run
+# if local main has unpushed commits. Override PI_HOST / PI_DIR as needed
+# (the checkout keeps its original name, magicboxie-device, on older installs).
+# Deploy restarts Wi-Fi, which can drop the SSH session near the end; the
+# deploy itself keeps running on the Pi, so check with `make pi-ssh-logs`.
+PI_HOST := admin@magicboxie-player.local
+PI_DIR := ~/magicboxie-device
+
+pi-ssh-deploy:
+	@git fetch -q origin && \
+	if [ -n "$$(git log origin/main..HEAD --oneline)" ]; then \
+		echo "Unpushed commits - push first, the Pi deploys from origin:"; \
+		git log origin/main..HEAD --oneline; exit 1; \
+	fi
+	ssh -o ServerAliveInterval=15 $(PI_HOST) 'cd $(PI_DIR) && make deploy'
+
+pi-ssh-logs:
+	ssh $(PI_HOST) 'cd $(PI_DIR) && make logs'
