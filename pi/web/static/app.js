@@ -69,9 +69,9 @@ function openSheet(m) {
   play.addEventListener('click', () => {closeSheet(); command('select_movie', m.id);});
   const close = document.createElement('button'); close.className = 'btn grey'; close.textContent = 'Close';
   close.addEventListener('click', closeSheet);
-  row.append(play, close); body.append(row); panel.append(body); $('sheet').classList.remove('hidden');
+  row.append(play, close); body.append(row); panel.append(body); $('sheet').classList.remove('hidden', 'top');
 }
-function closeSheet() {$('sheet').classList.add('hidden'); clearInterval(settingsTimer);}
+function closeSheet() {$('sheet').classList.add('hidden'); $('sheet').classList.remove('top'); clearInterval(settingsTimer);}
 $('sheet').addEventListener('click', e => {if (e.target === $('sheet')) closeSheet();});
 $('search').addEventListener('input', render);
 $('toggle').addEventListener('click', () => command(state.status === 'playing' ? 'pause' : 'play'));
@@ -190,7 +190,8 @@ function openSettings(tab) {
   else if (settingsTab === 'info') buildInfo(content);
   else buildControls(content, row);
   row.append(close); body.append(h, tabs, content, row); panel.append(body);
-  $('sheet').classList.remove('hidden');
+  // Settings drops down from the top; movie details still rise from the bottom.
+  $('sheet').classList.remove('hidden'); $('sheet').classList.add('top');
 }
 
 // Controls: Wi-Fi networks, reboot and shut down.

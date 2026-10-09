@@ -72,3 +72,5 @@ body.welcome main{max-width:480px;text-align:center;padding-top:48px}
 #sheet input{display:block;width:100%;box-sizing:border-box;margin:6px 0;padding:10px;font:inherit;border:0;border-radius:4px;background:#333;color:#fff}
 .settings-tabs{margin:4px 0 8px;padding-bottom:12px;border-bottom:1px solid #333}.settings-tabs .btn{flex:1}
 .log-sources{margin-top:4px}
+#sheet.top{align-items:flex-start}
+#sheet.top .panel{border-radius:0 0 12px 12px;padding-bottom:0;padding-top:env(safe-area-inset-top)}
