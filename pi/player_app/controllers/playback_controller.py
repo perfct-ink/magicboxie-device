@@ -81,6 +81,17 @@ class PlaybackController:
         self.last_input_at: float = self._startup_input_at
 
     @property
+    def home_server_has_work(self) -> bool:
+        """True while movies are downloading from the home server, or it is
+        reachable and still has movies for this device: queued to download,
+        or being made into the 480p copy this device downloads. Background
+        transcoding waits for all of that - downloads come first."""
+        if self.sync_busy:
+            return True
+        activity = self.sync_activity
+        return bool(activity and activity.reachable and (activity.queued or activity.preparing))
+
+    @property
     def activity_message(self) -> Optional[str]:
         """What the device is busy doing, for the big banner on the idle
         screen: update/internet progress first, then downloads and

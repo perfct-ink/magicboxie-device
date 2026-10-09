@@ -68,9 +68,11 @@ class TranscodeService:
                 self._failed_movie_ids.add(movie.id)
 
     def _may_run(self) -> bool:
-        """Only while nothing plays, and never while movies are downloading
-        from the home server: downloads take priority over transcoding."""
-        return self._controller.is_idle and not self._controller.sync_busy
+        """Only while nothing plays, and never while the home server is
+        reachable with movies still to download (or still making their
+        480p copies for this device): downloading takes priority over
+        transcoding, and those movies won't need transcoding here at all."""
+        return self._controller.is_idle and not self._controller.home_server_has_work
 
     def _next_movie_needing_transcode(self) -> Optional[Movie]:
         for movie in self._controller.movies:
@@ -102,7 +104,7 @@ class TranscodeService:
         try:
             while process.returncode is None:
                 if not self._may_run():
-                    logger.info("Playback or a download started - pausing transcode of %s", source.name)
+                    logger.info("Playback started or the home server has movies to fetch - pausing transcode of %s", source.name)
                     process.terminate()
                     await process.wait()
                     return

@@ -285,3 +285,18 @@ def test_transcode_reports_ffmpeg_progress_while_running(tmp_path):
     seen, after = asyncio.run(scenario())
     assert seen == [30.0]
     assert after is None
+
+
+def test_transcoding_waits_while_the_home_server_has_movies_for_this_device(tmp_path):
+    from player_app.services.home_sync_service import SyncActivity
+
+    controller = PlaybackController(FakeLibrary(transcode_dir=tmp_path), FakeMpv())
+    service = TranscodeService(controller)
+    controller.sync_activity = activity = SyncActivity(reachable=True)
+    assert service._may_run()  # reachable, but nothing to fetch
+    activity.queued = ["Next Movie"]
+    assert not service._may_run()
+    activity.queued, activity.preparing = [], [{"title": "Being Made 480p", "status": "transcoding"}]
+    assert not service._may_run()
+    activity.reachable = False  # left home: back to transcoding
+    assert service._may_run()
