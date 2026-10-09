@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 import zlib
 import threading
@@ -184,6 +185,20 @@ class MovieLibrary:
         smoothly, which is the whole reason TranscodeService exists."""
         transcoded = self.transcode_path_for(movie_id)
         return transcoded if transcoded.exists() else self._paths[movie_id]
+
+    def adopt_as_optimized(self, movie_id: int) -> None:
+        """Marks a movie's own file as already optimized for this device (the
+        home server's 480p copy), by hard-linking it in as the transcoded
+        copy - no second copy on disk. If the two directories are on
+        different filesystems the link fails and TranscodeService just
+        encodes it here as usual."""
+        dest = self.transcode_path_for(movie_id)
+        try:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.unlink(missing_ok=True)
+            os.link(self._paths[movie_id], dest)
+        except (OSError, KeyError) as exc:
+            logger.info("Could not adopt movie %d as optimized (%s); it will be transcoded here", movie_id, exc)
 
     def quarantine_failed_playback(self, movie_id: int) -> bool:
         """Preserve rejected media outside the library; retry originals after a bad encode."""

@@ -35,6 +35,13 @@ _DOWNLOAD_CHUNK_BYTES = 1024 * 1024
 _READY_STATUS = "ready"
 _USER_ID = "1"  # MagicBoxie-web has one shared login, not per-user accounts
 _TICKS_PER_SECOND = 10_000_000  # Jellyfin's RunTimeTicks unit is 100ns
+# The home server makes a 480p copy of each synced movie for this device
+# (MagicBoxiePlayerStatus, served from /Videos/{id}/player), so the Pi
+# doesn't have to re-encode it. Until it's "ready" the movie waits; if the
+# server couldn't make one ("error"), or is too old to say (no field at all),
+# the full-size file is downloaded and optimized here as before.
+_PLAYER_COPY_READY = "ready"
+_PLAYER_COPY_FAILED = "error"
 
 
 @dataclass
@@ -108,7 +115,8 @@ class HomeServerSync:
                 return
 
             existing_titles = {movie.title for movie in self._library.movies}
-            to_download = [m for m in remote_movies if m["Name"] not in existing_titles]
+            to_download = [m for m in remote_movies
+                           if m["Name"] not in existing_titles and not self._waiting_for_player_copy(m)]
             self.activity.queued = [m["Name"] for m in to_download]
 
             # Registration stays live during playback; defer expensive transfers.
@@ -243,10 +251,14 @@ class HomeServerSync:
 
         logger.info("Home server check-in: downloading %r", movie["Name"])
         temporary = dest_path.with_name("." + dest_path.name + ".partial")
+        if self._is_player_copy(movie):
+            url, params = f"{self._base_url}/Videos/{movie['Id']}/player", None
+        else:
+            url, params = f"{self._base_url}/Videos/{movie['Id']}/stream", {"static": "true"}
         try:
             async with session.get(
-                f"{self._base_url}/Videos/{movie['Id']}/stream",
-                params={"static": "true"},
+                url,
+                params=params,
                 headers=headers,
                 timeout=aiohttp.ClientTimeout(total=None, sock_connect=10, sock_read=60),
             ) as resp:
@@ -268,12 +280,25 @@ class HomeServerSync:
             temporary.unlink(missing_ok=True)
         return True
 
+    @staticmethod
+    def _waiting_for_player_copy(movie: dict) -> bool:
+        status = movie.get("MagicBoxiePlayerStatus")
+        return status is not None and status not in (_PLAYER_COPY_READY, _PLAYER_COPY_FAILED)
+
+    @staticmethod
+    def _is_player_copy(movie: dict) -> bool:
+        return movie.get("MagicBoxiePlayerStatus") == _PLAYER_COPY_READY
+
     def _save_metadata(self, remote_movie: dict) -> None:
         local_movie = next(
             (m for m in self._library.movies if m.title == remote_movie["Name"]), None
         )
         if local_movie is None:
             return
+        if self._is_player_copy(remote_movie):
+            # Already encoded for this device: use it as the optimized copy
+            # so TranscodeService doesn't re-encode it.
+            self._library.adopt_as_optimized(local_movie.id)
         self._library.save_metadata(
             local_movie.id,
             title=remote_movie["Name"],
@@ -292,6 +317,7 @@ class HomeServerSync:
             "RunTimeTicks": movie.get("RunTimeTicks") or movie.get("duration_seconds", 0) * _TICKS_PER_SECOND,
             "MagicBoxieOriginalFilename": movie.get("MagicBoxieOriginalFilename") or movie.get("filename") or "",
             "MagicBoxieStatus": movie.get("MagicBoxieStatus") or movie.get("status") or _READY_STATUS,
+            "MagicBoxiePlayerStatus": movie.get("MagicBoxiePlayerStatus"),
         }
 
     @staticmethod
@@ -325,10 +351,12 @@ class HomeServerSync:
 
         return "unknown-device"
 
-    @staticmethod
-    def _local_filename(movie: dict) -> str:
+    @classmethod
+    def _local_filename(cls, movie: dict) -> str:
         original = Path(movie.get("MagicBoxieOriginalFilename") or "")
         extension = original.suffix.lower() if original.suffix.lower() in VIDEO_EXTENSIONS else ".mp4"
+        if cls._is_player_copy(movie):
+            extension = ".mp4"
         # Titles come from the home server's own TMDB matching/filename
         # parsing and may contain "/" (e.g. "Fast/Furious") - not valid in a
         # single path component, so it gets swapped for a dash.

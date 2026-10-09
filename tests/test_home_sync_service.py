@@ -438,3 +438,59 @@ def test_check_in_while_playing_still_lists_what_is_waiting(tmp_path):
         mocked.post(f"{BASE_URL}/devices/register", payload={"items": [{"id": "1", "name": "Alpha"}]})
         asyncio.run(sync.check_in())
     assert sync.activity.queued == ["Alpha"]
+
+
+def _registered(player_status):
+    movie = {"Id": "1", "Name": "Gamma", "MagicBoxieOriginalFilename": "gamma.mkv", "MagicBoxieStatus": "ready"}
+    if player_status is not None:
+        movie["MagicBoxiePlayerStatus"] = player_status
+    return {"items": [movie]}
+
+
+def test_check_in_downloads_the_home_servers_480p_copy_and_skips_transcoding_it(tmp_path):
+    movies_dir = tmp_path / "movies"
+    movies_dir.mkdir()
+    library = MovieLibrary(movies_dir, thumbnail_dir=tmp_path / "thumbnails", transcode_dir=tmp_path / "transcoded")
+    sync = HomeServerSync(library, BASE_URL, "secret")
+
+    with aioresponses() as mocked:
+        mocked.post(f"{BASE_URL}/devices/register", payload=_registered("ready"))
+        mocked.post(f"{BASE_URL}/Users/AuthenticateByName", payload={"AccessToken": "tok123"})
+        mocked.get(f"{BASE_URL}/Videos/1/player", body=b"480p-bytes")
+
+        asyncio.run(sync.check_in())
+
+    # Always an .mp4, whatever the original was.
+    assert (movies_dir / "Gamma.mp4").read_bytes() == b"480p-bytes"
+    movie = library.movies[0]
+    # Adopted as the optimized copy, so TranscodeService has nothing to do.
+    assert library.transcode_path_for(movie.id).read_bytes() == b"480p-bytes"
+    assert library.playable_path_for(movie.id) == library.transcode_path_for(movie.id)
+
+
+def test_check_in_waits_for_the_home_servers_480p_copy(tmp_path):
+    library = _library(tmp_path)
+    sync = HomeServerSync(library, BASE_URL, "secret")
+
+    with aioresponses() as mocked:
+        # Neither a login nor a download: aioresponses raises for either.
+        mocked.post(f"{BASE_URL}/devices/register", payload=_registered("pending"))
+
+        asyncio.run(sync.check_in())
+
+    assert library.movies == []
+    assert sync.activity.queued == []
+
+
+def test_check_in_downloads_the_full_file_when_the_480p_copy_failed(tmp_path):
+    library = _library(tmp_path)
+    sync = HomeServerSync(library, BASE_URL, "secret")
+
+    with aioresponses() as mocked:
+        mocked.post(f"{BASE_URL}/devices/register", payload=_registered("error"))
+        mocked.post(f"{BASE_URL}/Users/AuthenticateByName", payload={"AccessToken": "tok123"})
+        mocked.get(f"{BASE_URL}/Videos/1/stream?static=true", body=b"full-size-bytes")
+
+        asyncio.run(sync.check_in())
+
+    assert (tmp_path / "movies" / "Gamma.mkv").read_bytes() == b"full-size-bytes"
