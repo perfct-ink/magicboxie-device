@@ -77,8 +77,6 @@ HOME_SERVER_CHECKIN_SECONDS = int(os.environ.get("MAGICBOXIE_HOME_SERVER_CHECKIN
 # While the server's name does not resolve (not on the home network), look
 # again this often, so a sync starts soon after joining that network.
 HOME_SERVER_RESOLVE_RETRY_SECONDS = 15
-# How long each movie stays up in the SD idle screen's slideshow.
-SLIDESHOW_SECONDS = 8
 
 
 def _mpv_output_args() -> List[str]:
@@ -129,7 +127,6 @@ async def _run() -> None:
             _run_playback(controller, stop_event),
             _run_transcode(controller, stop_event),
             _run_idle_dim(controller, stop_event),
-            _run_slideshow(controller, stop_event, startup_decided),
         ]
         if TRANSPORT != "http":
             workers.append(_run_ble(controller, stop_event))
@@ -268,19 +265,6 @@ async def _run_transcode(controller: PlaybackController, stop_event: asyncio.Eve
     from .services.transcode_service import TranscodeService
 
     await TranscodeService(controller).run(stop_event)
-
-
-async def _run_slideshow(controller: PlaybackController, stop_event: asyncio.Event,
-                         startup_decided: asyncio.Event) -> None:
-    """On the 720x480 TV output the idle screen shows one movie at a time;
-    step through them while nothing is playing. HD keeps its static grid."""
-    if not is_standard_definition():
-        return
-    await startup_decided.wait()
-    while not stop_event.is_set():
-        await sleep_unless_stopped(stop_event, SLIDESHOW_SECONDS)
-        if controller.is_idle and not stop_event.is_set():
-            await controller.advance_slideshow()
 
 
 async def _run_idle_dim(controller: PlaybackController, stop_event: asyncio.Event) -> None:

@@ -1,7 +1,6 @@
-"""Builds the "home screen" image shown on the device's own HDMI output
-whenever nothing is playing: a grid of every movie's thumbnail (plus title)
-on an HD screen, or one full-screen slide per movie on the default 720x480
-TV output, which the controller steps through as a slideshow. mpv can only display one image or video at a
+"""Builds a single composite image of every movie's thumbnail (plus title),
+arranged in a grid - the "home screen" shown on the device's own HDMI output
+whenever nothing is playing. mpv can only display one image or video at a
 time, not a live interactive UI, so this is regenerated and loaded as an
 ordinary (very long-lived) "file" whenever the device needs to show it.
 """
@@ -11,7 +10,7 @@ from io import BytesIO
 from pathlib import Path
 from typing import Sequence
 
-from PIL import Image, ImageDraw, ImageEnhance, ImageFont, ImageOps
+from PIL import Image, ImageDraw, ImageFont
 
 from ..display import is_standard_definition
 from ..storage import atomic_write
@@ -19,26 +18,25 @@ from ..models.library import MovieLibrary
 
 IDLE_SCREEN_PATH = Path("/tmp/magicboxie-idle-screen.png")
 
-# Standard definition (the default 720x480 output, see display.py) gets the
-# slideshow below instead of the grid: a grid that grows a row per three
-# movies gets shrunk to fit 480 lines until neither posters nor captions
-# can be read.
+# Standard definition (the default 720x480 output, see display.py) gets its
+# own layout: the HD grid scaled down to 720 wide would leave 7px captions.
 _SD = is_standard_definition()
-_COLUMNS = 6
-# HD grid: 6 columns * 320px cells = 1920px wide, matching a real HD display's width
+_COLUMNS = 3 if _SD else 6
+# SD: 3 columns * 240px cells = 720px, the output's exact width. HD:
+# 6 columns * 320px cells = 1920px wide, matching a real HD display's width
 # exactly - the canvas used to size itself to content alone (4 columns of
 # 300px cells = 1200px), which mpv then had to upscale ~1.6x to fill a real
 # screen, blurring the whole grid. Height still grows with row count (no
 # reason to pad it out to a fixed 1080/1200 - mpv letterboxes the
 # difference instead of stretching, which stays crisp).
-_THUMBNAIL_MAX_SIZE = (280, 200)
-_CAPTION_HEIGHT = 28
+_THUMBNAIL_MAX_SIZE = (200, 140) if _SD else (280, 200)
+_CAPTION_HEIGHT = 26 if _SD else 28
 _CELL_PADDING = 20
 _CELL_WIDTH = _THUMBNAIL_MAX_SIZE[0] + _CELL_PADDING * 2
 _CELL_HEIGHT = _THUMBNAIL_MAX_SIZE[1] + _CAPTION_HEIGHT + _CELL_PADDING * 2
 _BACKGROUND = (0, 0, 0)
 _TEXT_COLOR = (220, 220, 220)
-_CAPTION_FONT_SIZE = 18
+_CAPTION_FONT_SIZE = 17 if _SD else 18
 # fonts-dejavu-core (installed by both the Dockerfile and `make setup`) is
 # the only TrueType font guaranteed to be on the box. Without it, PIL falls
 # back to its own tiny unscaled bitmap font, which is illegible on an HDMI
@@ -56,46 +54,30 @@ _CAPTION_FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 # risk on a screen this was already once mistaken for a font bug (see the
 # idle-screen resolution fix elsewhere in this file's git history). A
 # static PNG can't actually spin either way.
-_SYNC_BADGE_MARGIN = 16
-_SYNC_BADGE_HEIGHT = 32
+_SYNC_BADGE_MARGIN = 10 if _SD else 16
+_SYNC_BADGE_HEIGHT = 26 if _SD else 32
 _SYNC_BADGE_PADDING_X = 12
 _SYNC_BADGE_COLOR = (24, 24, 24)
 _SYNC_DOT_COLOR = (245, 197, 66)
 _SYNC_LABEL_COLOR = (230, 230, 230)
-_SYNC_LABEL_FONT_SIZE = 15
-_SYNC_LABEL_MAX_WIDTH = 360
+_SYNC_LABEL_FONT_SIZE = 14 if _SD else 15
+_SYNC_LABEL_MAX_WIDTH = 260 if _SD else 360
 _SYNC_DOT_DIAMETER = 10
 
 # Footer lines: update/internet progress and whether a keyboard is attached
 # (and what Escape does). Plain ASCII/em-dash only (DejaVu Sans covers it).
-_HINT_LINE_HEIGHT = 40
-_HINT_PADDING = 16
-_HINT_FONT_SIZE = 20
+_HINT_LINE_HEIGHT = 26 if _SD else 40
+_HINT_PADDING = 10 if _SD else 16
+_HINT_FONT_SIZE = 15 if _SD else 20
 # Big banner across the top for whatever the device is busy doing (internet
 # check, updating, downloading...), readable from across the room.
-_BANNER_HEIGHT = 150
-_BANNER_FONT_SIZE = 64
+_BANNER_HEIGHT = 72 if _SD else 150
+_BANNER_FONT_SIZE = 34 if _SD else 64
 _BANNER_BACKGROUND = (176, 16, 24)
 _BANNER_COLOR = (255, 255, 255)
 _HINT_FOUND_COLOR = (120, 200, 120)
 _HINT_MISSING_COLOR = (245, 197, 66)
 _MIN_CANVAS_WIDTH = _COLUMNS * _CELL_WIDTH
-
-# SD slideshow (see render_idle_screen): one movie per image, so nothing has
-# to shrink to fit a grid. 640x480 is 4:3 in square pixels, which mpv's
-# --monitorpixelaspect (see main.py) stretches to exactly fill the 720x480
-# output of a 4:3 TV; a 720x480 image would be letterboxed instead.
-SLIDE_SIZE = (640, 480)
-# The poster sits above a reserved text area. Composite TVs overscan, so
-# everything stays inside a safe margin from each edge.
-_SLIDE_SAFE_X = 36
-_SLIDE_SAFE_Y = 22
-_SLIDE_TEXT_HEIGHT = 112
-_SLIDE_TEXT_BACKGROUND = (12, 12, 12)
-_SLIDE_TITLE_FONT_SIZE = 32
-_SLIDE_INFO_FONT_SIZE = 20
-_SLIDE_INFO_COLOR = (170, 170, 170)
-_BOLD_FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 
 
 def _load_caption_font() -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
@@ -118,23 +100,12 @@ def render_idle_screen(
     syncing_title: str | None = None,
     keyboard_names: Sequence[str] | None = None,
     status_message: str | None = None,
-    slide_index: int = 0,
-    standard_definition: bool = _SD,
 ) -> Path:
     """(Re)builds the grid from the library's current movies/thumbnails.
     Cheap enough - a handful of small images composited together - to just
     regenerate on demand each time it's shown rather than caching and
     invalidating it as the library changes. keyboard_names (None = unknown,
-    draws nothing) adds a footer saying whether a keyboard is detected.
-    In standard definition it instead draws the single slide for movie
-    slide_index (wrapping around)."""
-    if standard_definition:
-        canvas = _render_slide(library, slide_index, syncing_title, keyboard_names, status_message)
-        image_bytes = BytesIO()
-        canvas.save(image_bytes, format="PNG", compress_level=1)
-        atomic_write(output_path, image_bytes.getvalue())
-        return output_path
-
+    draws nothing) adds a footer saying whether a keyboard is detected."""
     movies = library.movies
     columns = _COLUMNS if movies else 1
     rows = max(1, -(-len(movies) // columns))  # ceil division
@@ -171,90 +142,6 @@ def render_idle_screen(
     canvas.save(image_bytes, format="PNG")
     atomic_write(output_path, image_bytes.getvalue())
     return output_path
-
-
-def _render_slide(
-    library: MovieLibrary,
-    slide_index: int,
-    syncing_title: str | None,
-    keyboard_names: Sequence[str] | None,
-    status_message: str | None,
-) -> Image.Image:
-    width, height = SLIDE_SIZE
-    poster_bottom = height - _SLIDE_TEXT_HEIGHT
-    canvas = Image.new("RGB", SLIDE_SIZE, _BACKGROUND)
-    draw = ImageDraw.Draw(canvas)
-    title_font = _load_font(_BOLD_FONT_PATH, _SLIDE_TITLE_FONT_SIZE)
-    info_font = _load_font(_CAPTION_FONT_PATH, _SLIDE_INFO_FONT_SIZE)
-    text_width = width - 2 * _SLIDE_SAFE_X
-
-    movies = library.movies
-    if movies:
-        index = slide_index % len(movies)
-        movie = movies[index]
-        title = movie.title
-        info = (f"{index + 1} of {len(movies)}", _SLIDE_INFO_COLOR)
-        thumbnail_path = library.thumbnail_path_for(movie.id)
-        if thumbnail_path is not None:
-            _paste_slide_poster(canvas, thumbnail_path, poster_bottom)
-    else:
-        title = "No movies yet"
-        info = ("Movies you add will show up here", _SLIDE_INFO_COLOR)
-
-    # What the device is busy doing outranks the slide counter.
-    if status_message:
-        info = (status_message, _BANNER_COLOR)
-    elif syncing_title:
-        info = (f"Downloading {syncing_title}", _SYNC_DOT_COLOR)
-    elif keyboard_names:
-        info = ("Keyboard detected \u2014 press Esc to quit the player", _HINT_FOUND_COLOR)
-
-    draw.rectangle((0, poster_bottom, width, height), fill=_SLIDE_TEXT_BACKGROUND)
-    title = _truncate_to_width(title, draw, title_font, text_width)
-    title_y = poster_bottom + 12
-    draw.text(((width - draw.textlength(title, font=title_font)) / 2, title_y),
-              title, fill=_BANNER_COLOR, font=title_font)
-
-    info_text, info_color = info
-    info_text = _truncate_to_width(info_text, draw, info_font, text_width - 24)
-    info_width = draw.textlength(info_text, font=info_font)
-    info_x = (width - info_width) / 2
-    info_y = height - _SLIDE_SAFE_Y - _SLIDE_INFO_FONT_SIZE - 6
-    if status_message:
-        draw.rounded_rectangle(
-            (info_x - 12, info_y - 5, info_x + info_width + 12, info_y + _SLIDE_INFO_FONT_SIZE + 7),
-            radius=8, fill=_BANNER_BACKGROUND,
-        )
-    draw.text((info_x, info_y), info_text, fill=info_color, font=info_font)
-    return canvas
-
-
-def _paste_slide_poster(canvas: Image.Image, thumbnail_path: Path, poster_bottom: int) -> None:
-    """The poster as large as it fits above the text area, over a dark,
-    blurred copy of itself so its edges don't float on flat black."""
-    try:
-        with Image.open(thumbnail_path) as source:
-            poster = source.convert("RGB")
-    except OSError:
-        return
-    width = canvas.width
-    # Blurring a tiny copy and scaling it up is far cheaper on the Pi Zero
-    # than a real blur at full size, and looks the same.
-    backdrop = ImageOps.fit(poster, (32, 24)).resize((width, poster_bottom), Image.BILINEAR)
-    canvas.paste(ImageEnhance.Brightness(backdrop).enhance(0.35), (0, 0))
-
-    box = (width - 2 * _SLIDE_SAFE_X, poster_bottom - _SLIDE_SAFE_Y - 10)
-    scale = min(box[0] / poster.width, box[1] / poster.height)
-    size = (max(1, round(poster.width * scale)), max(1, round(poster.height * scale)))
-    poster = poster.resize(size, Image.BILINEAR)
-    canvas.paste(poster, ((width - size[0]) // 2, _SLIDE_SAFE_Y + (box[1] - size[1]) // 2))
-
-
-def _load_font(path: str, size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
-    try:
-        return ImageFont.truetype(path, size)
-    except OSError:
-        return ImageFont.load_default()
 
 
 def _footer_lines(keyboard_names: Sequence[str] | None) -> list:

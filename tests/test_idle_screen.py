@@ -45,11 +45,11 @@ def test_render_idle_screen_draws_sync_badge_only_when_a_title_is_given(tmp_path
             return corner.getcolors(maxcolors=1_000_000)
 
     without_badge = tmp_path / "idle-no-sync.png"
-    render_idle_screen(library, output_path=without_badge)
+    render_idle_screen(library, output_path=without_badge, standard_definition=False)
     colors_without = top_left_colors(without_badge)
 
     with_badge = tmp_path / "idle-sync.png"
-    render_idle_screen(library, output_path=with_badge, syncing_title="Alpha")
+    render_idle_screen(library, output_path=with_badge, syncing_title="Alpha", standard_definition=False)
     colors_with = top_left_colors(with_badge)
 
     assert colors_without != colors_with
@@ -78,7 +78,7 @@ def test_render_idle_screen_composites_real_thumbnails(tmp_path):
 def test_render_idle_screen_footer_grows_with_keyboard_and_status_lines(tmp_path):
     def height(**kwargs):
         path = tmp_path / "idle.png"
-        render_idle_screen(_EmptyLibrary(), output_path=path, **kwargs)
+        render_idle_screen(_EmptyLibrary(), output_path=path, standard_definition=False, **kwargs)
         with Image.open(path) as image:
             return image.height
 
@@ -94,18 +94,68 @@ def test_render_idle_screen_footer_grows_with_keyboard_and_status_lines(tmp_path
 
 def test_render_idle_screen_adds_a_banner_for_activity(tmp_path):
     plain, banner = tmp_path / "a.png", tmp_path / "b.png"
-    render_idle_screen(_EmptyLibrary(), output_path=plain)
-    render_idle_screen(_EmptyLibrary(), output_path=banner, status_message="Updating device software")
+    render_idle_screen(_EmptyLibrary(), output_path=plain, standard_definition=False)
+    render_idle_screen(_EmptyLibrary(), output_path=banner, status_message="Updating device software",
+                       standard_definition=False)
     with Image.open(plain) as a, Image.open(banner) as b:
         assert b.height > a.height
         assert b.getpixel((5, 5)) != (0, 0, 0)
 
 
-def test_render_idle_screen_matches_the_output_width(tmp_path):
-    from player_app.views import idle_screen
-
+def test_hd_grid_is_as_wide_as_an_hd_screen(tmp_path):
     output_path = tmp_path / "idle.png"
-    render_idle_screen(FakeLibrary(), output_path=output_path)
+    render_idle_screen(FakeLibrary(), output_path=output_path, standard_definition=False)
     with Image.open(output_path) as image:
-        # 720 on the default 480-line output; 1920 when this machine has a keyboard.
-        assert image.width == (720 if idle_screen._SD else 1920)
+        assert image.width == 1920
+
+
+def _slide(tmp_path, library, **kwargs):
+    path = tmp_path / "slide.png"
+    render_idle_screen(library, output_path=path, standard_definition=True, **kwargs)
+    with Image.open(path) as image:
+        return image.convert("RGB")
+
+
+def test_sd_slide_is_one_full_screen_image(tmp_path):
+    from player_app.views.idle_screen import SLIDE_SIZE
+
+    for library in (FakeLibrary(), _EmptyLibrary()):
+        for kwargs in ({}, {"status_message": "Updating"}, {"keyboard_names": ["Kbd"]}, {"syncing_title": "Alpha"}):
+            assert _slide(tmp_path, library, **kwargs).size == SLIDE_SIZE == (640, 480)
+
+
+def test_sd_slide_fills_the_poster_area_with_one_movie(tmp_path):
+    red, blue = tmp_path / "0.jpg", tmp_path / "1.jpg"
+    Image.new("RGB", (200, 300), (255, 0, 0)).save(red)
+    Image.new("RGB", (200, 300), (0, 0, 255)).save(blue)
+    library = FakeLibrary(thumbnail_paths={0: red, 1: blue})
+
+    first = _slide(tmp_path, library, slide_index=0)
+    second = _slide(tmp_path, library, slide_index=1)
+    wrapped = _slide(tmp_path, library, slide_index=2)
+
+    r, g, b = first.getpixel((320, 180))
+    assert r > 200 and g < 60 and b < 60
+    r, g, b = second.getpixel((320, 180))
+    assert b > 200 and r < 60 and g < 60
+    assert list(wrapped.getdata()) == list(first.getdata())
+    # The poster is big: at least two thirds of the screen's height.
+    column = [first.getpixel((320, y)) for y in range(480)]
+    assert sum(1 for r, g, b in column if r > 200 and g < 60) >= 320
+
+
+def test_sd_slide_keeps_the_bottom_for_text(tmp_path):
+    poster = tmp_path / "0.jpg"
+    Image.new("RGB", (400, 300), (255, 255, 255)).save(poster)
+    image = _slide(tmp_path, FakeLibrary(thumbnail_paths={0: poster}))
+    # The poster never reaches into the text area...
+    assert image.getpixel((5, 470)) == (12, 12, 12)
+    # ...which carries the title in white.
+    text_area = image.crop((0, 368, 640, 480)).getcolors(maxcolors=1_000_000)
+    assert any(min(color) > 230 for _count, color in text_area)
+
+
+def test_sd_slide_shows_activity_in_red(tmp_path):
+    image = _slide(tmp_path, FakeLibrary(), status_message="Updating device software")
+    colors = image.crop((0, 368, 640, 480)).getcolors(maxcolors=1_000_000)
+    assert any(r > 150 and g < 40 and b < 40 for _count, (r, g, b) in colors)

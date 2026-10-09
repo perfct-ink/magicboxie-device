@@ -47,8 +47,6 @@ class PlaybackController:
         self._positions = {key: value for key, value in raw_positions.items()
                            if key.isdecimal() and type(value) is int and 0 <= value <= 0xFFFFFFFF}
         self._software_update_phase = None
-        # Which movie the SD idle screen's slideshow is on (see idle_screen.py).
-        self.slide_index = 0
 
         # Set/cleared by TranscodeService, read by ble_service.py's status
         # poll loop to notify the app - a shared hub between the two rather
@@ -200,13 +198,6 @@ class PlaybackController:
             if self.is_idle:
                 await self.player.show_image(image_path)
 
-    async def advance_slideshow(self) -> None:
-        """Steps the SD idle screen on to the next movie's slide."""
-        if not self.is_idle:
-            return
-        self.slide_index = (self.slide_index + 1) % max(1, len(self.library.movies))
-        await self.show_idle_screen()
-
     async def _render_idle_screen(self) -> Path:
         if self._render_lock is None:
             self._render_lock = asyncio.Lock()
@@ -214,8 +205,7 @@ class PlaybackController:
             return await run_io(render_idle_screen, self.library,
                                 syncing_title=self.currently_syncing_movie_title,
                                 keyboard_names=list(self.keyboard_names),
-                                status_message=self.activity_message,
-                                slide_index=self.slide_index)
+                                status_message=self.activity_message)
 
     async def _show_idle_screen_locked(self) -> None:
         image_path = await self._render_idle_screen()

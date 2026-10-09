@@ -69,6 +69,26 @@ def test_status_stays_idle_while_idle_screen_is_shown():
     assert state.movie_id is None
 
 
+def test_slideshow_steps_through_movies_only_while_idle():
+    async def scenario():
+        mpv = FakeMpv()
+        controller = PlaybackController(FakeLibrary(), mpv)
+        seen = []
+        await controller.advance_slideshow()
+        seen.append(controller.slide_index)
+        await controller.advance_slideshow()
+        seen.append(controller.slide_index)
+        await controller.handle_command(Command(opcode=Opcode.SELECT_MOVIE, argument=0))
+        await controller.advance_slideshow()
+        seen.append(controller.slide_index)
+        return seen, mpv
+
+    seen, mpv = asyncio.run(scenario())
+    # Two movies: wraps back to the first, then holds while one plays.
+    assert seen == [1, 0, 0]
+    assert mpv.shown_image_path is not None
+
+
 def test_pause_reflected_in_status():
     async def scenario():
         controller = PlaybackController(FakeLibrary(), FakeMpv())
