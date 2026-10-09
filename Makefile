@@ -64,7 +64,7 @@ pi:
 pi-%:
 	@$(MAKE) -C pi $*
 
-# Deploy from this machine: SSH to the Pi and run `make deploy` in its checkout.
+# Deploy from this machine: SSH to the Pi and run `make pi` in its checkout.
 # The Pi pulls from origin, so push your commits first - this refuses to run
 # if local main has unpushed commits. Override PI_HOST / PI_DIR as needed
 # (the checkout keeps its original name, magicboxie-device, on older installs).
@@ -79,7 +79,7 @@ pi-ssh-deploy:
 		echo "Unpushed commits - push first, the Pi deploys from origin:"; \
 		git log origin/main..HEAD --oneline; exit 1; \
 	fi
-	ssh -o ServerAliveInterval=15 $(PI_HOST) 'cd $(PI_DIR) && make deploy'
+	ssh -o ServerAliveInterval=15 $(PI_HOST) 'cd $(PI_DIR) && make pi'
 
 pi-ssh-logs:
 	ssh $(PI_HOST) 'cd $(PI_DIR) && make logs'
