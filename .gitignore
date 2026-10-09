@@ -10,3 +10,4 @@ wifi-networks.lock
 
 # Personal Claude Code permissions
 .claude/settings.local.json
+pi/build/
