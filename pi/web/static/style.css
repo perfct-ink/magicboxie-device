@@ -29,6 +29,8 @@ box-shadow:0 0 0 1px rgba(255,255,255,.06);font:inherit}
 .card .cap small{display:block;font-weight:400;color:#a3a3a3;margin-top:2px}
 .card.now{box-shadow:0 0 0 2px #e50914}
 .card .badge{position:absolute;top:6px;left:6px;background:rgba(0,0,0,.8);font-size:10px;padding:2px 6px;border-radius:3px}
+.card .progress{position:absolute;left:0;right:0;bottom:0;height:3px;background:rgba(255,255,255,.25)}
+.card .progress i{display:block;height:100%;background:#e50914}
 .empty{color:#a3a3a3;line-height:1.6;padding:24px 0}
 .btn{font:inherit;font-weight:700;border:0;border-radius:4px;padding:12px 20px;cursor:pointer;background:#fff;color:#000}
 .btn.red{background:#e50914;color:#fff}.btn.grey{background:rgba(109,109,110,.7);color:#fff}

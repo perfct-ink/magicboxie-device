@@ -31,8 +31,8 @@ def test_get_movies():
 
     data = asyncio.run(scenario())
     assert data == [
-        {"id": 0, "title": "A", "duration_seconds": 100, "description": None, "year": None, "needs_transcoding": True},
-        {"id": 1, "title": "B", "duration_seconds": 200, "description": None, "year": None, "needs_transcoding": True},
+        {"id": 0, "title": "A", "duration_seconds": 100, "description": None, "year": None, "needs_transcoding": True, "position_seconds": 0},
+        {"id": 1, "title": "B", "duration_seconds": 200, "description": None, "year": None, "needs_transcoding": True, "position_seconds": 0},
     ]
 
 
@@ -51,6 +51,24 @@ def test_get_movies_reports_needs_transcoding_false_once_a_transcoded_file_exist
     by_id = {movie["id"]: movie for movie in data}
     assert by_id[0]["needs_transcoding"] is False
     assert by_id[1]["needs_transcoding"] is True
+
+
+def test_get_movies_reports_where_a_previously_played_movie_left_off():
+    async def scenario():
+        client, controller = await _make_client()
+        try:
+            controller._set_position(0, 42)
+            # Played to the end: nothing left to resume, so no progress.
+            controller._set_position(1, 200)
+            resp = await client.get("/api/movies")
+            return await resp.json()
+        finally:
+            await client.close()
+
+    data = asyncio.run(scenario())
+    by_id = {movie["id"]: movie for movie in data}
+    assert by_id[0]["position_seconds"] == 42
+    assert by_id[1]["position_seconds"] == 0
 
 
 def test_get_version():
@@ -293,11 +311,13 @@ def test_post_metadata_overrides_fields_in_movie_list():
         "description": "A movie.",
         "year": 1999,
         "needs_transcoding": True,
+        "position_seconds": 0,
     }
     assert post_body == expected
     assert movies[0] == expected
     assert movies[1] == {
         "id": 1, "title": "B", "duration_seconds": 200, "description": None, "year": None, "needs_transcoding": True,
+        "position_seconds": 0,
     }
 
 

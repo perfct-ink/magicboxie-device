@@ -45,6 +45,14 @@ function render() {
     // Only one movie is transcoded at a time; the rest of the backlog is just queued.
     const badge = m.id === state.transcoding_movie_id ? 'Optimizing…' : m.needs_transcoding ? 'Queued' : '';
     if (badge) {const b = document.createElement('span'); b.className = 'badge'; b.textContent = badge; card.append(b);}
+    // Watched partway before: a progress bar along the bottom of the poster
+    // (live for the movie playing now, saved position for the rest).
+    const pos = m.id === state.movie_id && state.status !== 'stopped' ? state.position_seconds : m.position_seconds;
+    if (pos > 0 && m.duration_seconds) {
+      const bar = document.createElement('div'); bar.className = 'progress';
+      const fill = document.createElement('i'); fill.style.width = Math.min(100, pos / m.duration_seconds * 100) + '%';
+      bar.append(fill); card.append(bar);
+    }
     card.addEventListener('click', () => openSheet(m)); grid.append(card);
   }
 }
@@ -96,11 +104,14 @@ function startTicker(m) {
 }
 async function status() {
   try {
-    const previous = state.transcoding_movie_id;
+    const previous = state.transcoding_movie_id, previousMovie = state.status === 'stopped' ? null : state.movie_id;
     state = await api('/api/status'); $('conn').textContent = 'Connected';
     stopTicker();
     // A transcode started or finished: reload so "Queued" badges are current.
-    if (previous !== undefined && previous !== state.transcoding_movie_id) await load();
+    // Same when the movie playing changes or stops, so its saved position
+    // (the progress bar under it) is current.
+    const playingMovie = state.status === 'stopped' ? null : state.movie_id;
+    if (previous !== undefined && (previous !== state.transcoding_movie_id || previousMovie !== playingMovie)) await load();
     const m = movies.find(x => x.id === state.movie_id), active = m && state.status !== 'stopped';
     // Top-right spinner while the device is transcoding (one movie at a time).
     const optimizing = movies.find(x => x.id === state.transcoding_movie_id);

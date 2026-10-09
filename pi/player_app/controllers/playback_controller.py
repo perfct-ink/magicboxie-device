@@ -322,6 +322,12 @@ class PlaybackController:
             position_seconds=position,
         )
 
+    def saved_position(self, movie_id: int) -> int:
+        """Where this movie would resume, in seconds: 0 if it was never
+        played or was last played to its end. The web page draws its
+        "previously watched" progress bar from this."""
+        return self._resume_position(movie_id)
+
     def _resume_position(self, movie_id: int) -> int:
         position = self._positions.get(str(movie_id), 0)
         movie = next((movie for movie in self.movies if movie.id == movie_id), None)

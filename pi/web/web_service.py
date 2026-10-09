@@ -165,6 +165,9 @@ def _movie_payload(controller: PlaybackController, movie: Movie) -> dict:
         # distinct from the transcode_status characteristic's "actively
         # transcoding right now" signal.
         "needs_transcoding": not controller.library.transcode_path_for(movie.id).exists(),
+        # Where playback would resume (0 = never played, or played to the
+        # end) - the page draws a progress bar under movies watched partway.
+        "position_seconds": controller.saved_position(movie.id),
     }
     payload.update(controller.library.metadata_for(movie.id))
     return payload
