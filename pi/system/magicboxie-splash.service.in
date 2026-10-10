@@ -1,6 +1,9 @@
 # Black screen with a small spinner from early boot until the player takes
 # over, instead of the console login. Escape gives the screen back to the
 # login prompt and stops the player. Started before getty on tty1.
+# Rendered by `make wifi-service`. Runs splash.py straight from the checkout
+# (@REPO_DIR@), so a self-update's git pull changes the boot screen without
+# needing sudo to reinstall a copy.
 [Unit]
 Description=MagicBoxie boot loader screen
 DefaultDependencies=no
@@ -9,7 +12,7 @@ Before=getty@tty1.service magicboxie-player.service
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 /usr/local/lib/magicboxie/splash.py
+ExecStart=/usr/bin/python3 @REPO_DIR@/player_app/splash.py
 TimeoutStopSec=5
 
 [Install]

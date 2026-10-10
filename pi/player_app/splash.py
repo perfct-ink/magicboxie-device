@@ -1,8 +1,9 @@
 """Boot loader: the MB logo above three animated dots on black instead of
 the console login.
 
-Installed as a root-owned standalone script (standard library only) and run
-by magicboxie-splash.service before getty. It switches tty1 to graphics mode
+A standalone script (standard library only) run as root straight from the
+checkout by magicboxie-splash.service before getty, so a self-update's git
+pull changes it without a reinstall. It switches tty1 to graphics mode
 so no console text shows, draws on the framebuffer, and hands the screen over
 once the player's mpv is up, and gives the console back when the player
 exits. While the player restarts (a self-update, crash recovery) the logo

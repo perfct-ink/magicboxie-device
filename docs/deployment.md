@@ -305,7 +305,11 @@ is too short to count.
   `quiet loglevel=0 logo.nologo vt.global_cursor_default=0` to
   `/boot/firmware/cmdline.txt` by hand (one line, a mistake can stop the Pi
   booting, so this is not done automatically).
-- Installed by `make pi-wifi-service` (and so by install/deploy).
+- Installed by `make pi-wifi-service` (and so by install/deploy). The unit
+  runs `pi/player_app/splash.py` from the checkout, so a self-update changes
+  the boot screen on the next boot without reinstalling anything. Devices set
+  up before this change still run an old copy from `/usr/local/lib/magicboxie/`
+  until `make pi` runs once with sudo.
 
 ## Self-update lifecycle
 
