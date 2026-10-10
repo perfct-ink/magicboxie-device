@@ -81,8 +81,8 @@ class HomeServerSync:
         # PlaybackController for web_service.py's /api/status to report,
         # without this class needing to know PlaybackController exists.
         self._on_progress = on_progress or (lambda _title: None)
-        # Keep registration alive while playing, but defer downloads and
-        # probing until idle so they do not compete with video decoding.
+        # Downloads run regardless; only probing/scanning new files waits
+        # until idle so it does not compete with video decoding.
         self._is_idle = is_idle
         # True from the moment there are movies to download until the check-in
         # ends, so transcoding (CPU- and disk-heavy) yields to the download.
@@ -119,10 +119,9 @@ class HomeServerSync:
                            if m["Name"] not in existing_titles and not self._waiting_for_player_copy(m)]
             self.activity.queued = [m["Name"] for m in to_download]
 
-            # Registration stays live during playback; defer expensive transfers.
-            if not self._is_idle():
-                return
-
+            # Downloads take priority over everything else, playback included:
+            # they run whether or not a movie is playing. Only the library
+            # scan below waits for idle (it forks ffmpeg for each new file).
             if to_download:
                 self._on_busy(True)
             if to_download:
@@ -148,13 +147,6 @@ class HomeServerSync:
                     # several concurrently would also just contend with each
                     # other for the same bandwidth with nothing gained.
                     for index, movie in enumerate(to_download):
-                        if not self._is_idle():
-                            # Playback started partway through this cycle -
-                            # let whatever's already mid-download finish
-                            # (an aborted large download over a slow link is
-                            # pure waste) but don't start any more.
-                            logger.info("Home server check-in: pausing further downloads - playback started")
-                            break
                         self.activity.queued = [m["Name"] for m in to_download[index + 1:]]
                         self._on_progress(movie["Name"])
                         try:

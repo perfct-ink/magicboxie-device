@@ -74,6 +74,8 @@ HOME_SERVER_PASSWORD = os.environ.get("MAGICBOXIE_HOME_SERVER_PASSWORD", "")
 # movies promptly whenever it happens to be on the home WiFi, and a failed
 # check-in (server unreachable) is cheap and expected - see HomeServerSync.
 HOME_SERVER_CHECKIN_SECONDS = int(os.environ.get("MAGICBOXIE_HOME_SERVER_CHECKIN_SECONDS", "60"))
+# While the server still has movies for this device, check in this often.
+HOME_SERVER_BUSY_RETRY_SECONDS = 10
 # While the server's name does not resolve (not on the home network), look
 # again this often, so a sync starts soon after joining that network.
 HOME_SERVER_RESOLVE_RETRY_SECONDS = 15
@@ -483,7 +485,10 @@ async def _run_home_sync(controller: PlaybackController, stop_event: asyncio.Eve
                 await sync.check_in()
             except Exception:
                 logger.exception("Home server check-in failed unexpectedly")
-            await sleep_unless_stopped(stop_event, HOME_SERVER_CHECKIN_SECONDS)
+            # Still movies to fetch (a download failed, or the server is
+            # still making 480p copies)? Look again soon, not in a minute.
+            busy = sync.activity.reachable and (sync.activity.queued or sync.activity.preparing)
+            await sleep_unless_stopped(stop_event, HOME_SERVER_BUSY_RETRY_SECONDS if busy else HOME_SERVER_CHECKIN_SECONDS)
     finally:
         redraw_task.cancel()
         await asyncio.gather(redraw_task, return_exceptions=True)

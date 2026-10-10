@@ -237,51 +237,25 @@ def test_check_in_clears_progress_even_when_a_download_fails(tmp_path):
     assert progress_calls == ["Alpha", None]
 
 
-def test_check_in_registers_but_does_not_download_while_playing(tmp_path):
+def test_check_in_downloads_while_playing(tmp_path):
+    """Downloads take priority over everything, playback included."""
     library = _library(tmp_path)
     sync = HomeServerSync(library, BASE_URL, "secret", is_idle=lambda: False)
-    with aioresponses() as mocked:
-        mocked.post(f"{BASE_URL}/devices/register", payload={"items": [
-            {"id": "1", "name": "Alpha", "filename": "alpha.mp4"}
-        ]})
-        asyncio.run(sync.check_in())
-        assert sum(len(calls) for calls in mocked.requests.values()) == 1
-    assert library.movies == []
-    assert list(library.root.iterdir()) == []
-
-
-def test_check_in_stops_starting_new_downloads_once_playback_begins(tmp_path):
-    """Playback starting partway through a check-in lets whatever's already
-    downloading finish (an aborted large download over a slow link is pure
-    waste) but must not start the next one."""
-    library = _library(tmp_path)
-    idle = [True]
-    sync = HomeServerSync(library, BASE_URL, "secret", is_idle=lambda: idle[0])
-
-    def stop_being_idle_after_alpha(title):
-        if title is None:
-            idle[0] = False
-
     with aioresponses() as mocked:
         mocked.post(f"{BASE_URL}/Users/AuthenticateByName", payload={"AccessToken": "tok123"}, repeat=True)
         mocked.get(
             f"{BASE_URL}/Users/1/Items?IncludeItemTypes=Movie&Recursive=true",
-            payload={
-                "Items": [
-                    {"Id": "1", "Name": "Alpha", "MagicBoxieOriginalFilename": "alpha.mp4", "MagicBoxieStatus": "ready"},
-                    {"Id": "2", "Name": "Beta", "MagicBoxieOriginalFilename": "beta.mp4", "MagicBoxieStatus": "ready"},
-                ],
-            },
+            payload={"Items": [
+                {"Id": "1", "Name": "Alpha", "MagicBoxieOriginalFilename": "alpha.mp4", "MagicBoxieStatus": "ready"},
+                {"Id": "2", "Name": "Beta", "MagicBoxieOriginalFilename": "beta.mp4", "MagicBoxieStatus": "ready"},
+            ]},
         )
         mocked.get(f"{BASE_URL}/Videos/1/stream?static=true", body=b"alpha-bytes")
-        # No /Videos/2/stream mock - if Beta's download is attempted anyway,
-        # aioresponses raises for the unmatched request and the test fails.
-
-        sync._on_progress = stop_being_idle_after_alpha
+        mocked.get(f"{BASE_URL}/Videos/2/stream?static=true", body=b"beta-bytes")
         asyncio.run(sync.check_in())
 
     assert (tmp_path / "movies" / "Alpha.mp4").exists()
-    assert not (tmp_path / "movies" / "Beta.mp4").exists()
+    assert (tmp_path / "movies" / "Beta.mp4").exists()
 
 
 def test_check_in_defers_scan_and_metadata_when_playback_starts_mid_cycle(tmp_path):

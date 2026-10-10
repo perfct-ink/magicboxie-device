@@ -405,7 +405,7 @@ def _activity_payload(controller: PlaybackController) -> dict:
         "transcode_queue": transcode_queue,
         "transcode_failed": transcode_failed,
         "home_server": home_server,
-        # Downloads and transcodes both wait while a movie plays.
+        # Only transcoding waits while a movie plays; downloads carry on.
         "paused_for_playback": not controller.is_idle,
     }
 
