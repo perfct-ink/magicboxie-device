@@ -60,6 +60,7 @@ def test_check_in_downloads_ready_movie_and_saves_metadata(tmp_path):
         "description": "A movie.",
         "year": 1999,
         "duration_seconds": 123,
+        "player_copy_version": 0,
     }
 
 
@@ -130,6 +131,7 @@ def test_check_in_registers_and_downloads_content_when_available(tmp_path):
         "description": "A registered movie.",
         "year": 2001,
         "duration_seconds": 98,
+        "player_copy_version": 0,
     }
 
 
@@ -316,6 +318,7 @@ def test_check_in_defers_scan_and_metadata_when_playback_starts_mid_cycle(tmp_pa
         "description": "A movie.",
         "year": 1999,
         "duration_seconds": 123,
+        "player_copy_version": 0,
     }
 
 
@@ -465,6 +468,64 @@ def test_check_in_downloads_the_full_file_when_the_480p_copy_failed(tmp_path):
         asyncio.run(sync.check_in())
 
     assert (tmp_path / "movies" / "Gamma.mkv").read_bytes() == b"full-size-bytes"
+
+
+def _registered_copy(version):
+    payload = _registered("ready")
+    payload["items"][0]["MagicBoxiePlayerVersion"] = version
+    return payload
+
+
+def test_check_in_swaps_a_local_original_for_the_servers_newer_copy(tmp_path):
+    movies_dir = tmp_path / "movies"
+    movies_dir.mkdir()
+    (movies_dir / "Gamma.mkv").write_bytes(b"full-size-bytes")
+    library = MovieLibrary(movies_dir, thumbnail_dir=tmp_path / "thumbnails", transcode_dir=tmp_path / "transcoded")
+    library.scan()
+    movie_id = library.movies[0].id
+    # Left over from when the player transcoded movies itself.
+    (tmp_path / "transcoded").mkdir()
+    library.transcode_path_for(movie_id).write_bytes(b"old-transcode")
+    sync = HomeServerSync(library, BASE_URL, "secret", is_idle=lambda: False)
+
+    with aioresponses() as mocked:
+        mocked.post(f"{BASE_URL}/devices/register", payload=_registered_copy(2))
+        mocked.post(f"{BASE_URL}/Users/AuthenticateByName", payload={"AccessToken": "tok123"})
+        mocked.get(f"{BASE_URL}/Videos/1/player", body=b"480p-bytes")
+        asyncio.run(sync.check_in())
+
+    assert not (movies_dir / "Gamma.mkv").exists()
+    # Same movie (id, thumbnail, metadata), now playing the copy - even
+    # before the deferred rescan.
+    assert library.playable_path_for(movie_id).read_bytes() == b"480p-bytes"
+    assert library.metadata_for(movie_id)["player_copy_version"] == 2
+
+    with aioresponses() as mocked:
+        # Already current: no login, no download.
+        mocked.post(f"{BASE_URL}/devices/register", payload=_registered_copy(2))
+        asyncio.run(sync.check_in())
+    assert sync.activity.queued == []
+
+    sync._is_idle = lambda: True
+    with aioresponses() as mocked:
+        mocked.post(f"{BASE_URL}/devices/register", payload=_registered_copy(2))
+        asyncio.run(sync.check_in())
+    assert [m.id for m in library.movies] == [movie_id]
+    assert library.metadata_for(movie_id)["player_copy_version"] == 2
+
+
+def test_check_in_keeps_a_local_movie_when_the_server_has_no_newer_copy(tmp_path):
+    library = _library(tmp_path)
+    (library.root / "Gamma.mkv").write_bytes(b"full-size-bytes")
+    library.scan()
+    sync = HomeServerSync(library, BASE_URL, "secret")
+
+    with aioresponses() as mocked:
+        # An unversioned copy (older server): no login, no download.
+        mocked.post(f"{BASE_URL}/devices/register", payload=_registered("ready"))
+        asyncio.run(sync.check_in())
+
+    assert (library.root / "Gamma.mkv").read_bytes() == b"full-size-bytes"
 
 
 def test_download_is_throttled_only_while_playing(tmp_path, monkeypatch):

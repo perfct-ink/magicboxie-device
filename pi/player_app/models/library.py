@@ -184,6 +184,25 @@ class MovieLibrary:
         transcoded = self.transcode_path_for(movie_id)
         return transcoded if transcoded.exists() else self._paths[movie_id]
 
+    def replace_file(self, movie_id: int, downloaded: Path, filename: str) -> None:
+        """Swaps a movie's file for a newly downloaded one (the home server's
+        current player copy), keeping its id - and so its thumbnail, metadata
+        and resume position. The old file goes, whatever its name, along with
+        any copy an older release transcoded here (which playable_path_for
+        would otherwise keep preferring)."""
+        with self._scan_lock:
+            old = self._paths.get(movie_id)
+            target = self.root / filename
+            publish_file(downloaded, target)
+            if old is not None and old != target:
+                old.unlink(missing_ok=True)
+                self._id_by_filename.pop(old.name, None)
+            self._id_by_filename[target.name] = movie_id
+            self._save_id_map()
+            self._paths[movie_id] = target
+            self.transcode_path_for(movie_id).unlink(missing_ok=True)
+            logger.info("Replaced movie %d's file with %s", movie_id, target.name)
+
     def quarantine_failed_playback(self, movie_id: int) -> bool:
         """Preserve rejected media outside the library; retry originals after a bad encode."""
         with self._scan_lock:
