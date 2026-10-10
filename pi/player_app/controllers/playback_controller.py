@@ -26,6 +26,11 @@ PLAYBACK_SAVE_INTERVAL_SECONDS = 5
 _DOWNLOAD_COLOR = (245, 197, 66)
 _TRANSCODE_COLOR = (90, 200, 250)
 _UPDATE_COLOR = (255, 255, 255)
+# How long the home server must stay out of reach before this device counts
+# as offline and transcodes on its own. Covers boot, when Wi-Fi gets 30
+# seconds to join a saved network and the server's name is retried every 15,
+# so a movie that's about to be downloaded isn't transcoded here first.
+HOME_SERVER_OFFLINE_SECONDS = 90
 
 
 class PlaybackController:
@@ -93,12 +98,29 @@ class PlaybackController:
     def home_server_has_work(self) -> bool:
         """True while movies are downloading from the home server, or it is
         reachable and still has movies for this device: queued to download,
-        or being made into the 480p copy this device downloads. Background
-        transcoding waits for all of that - downloads come first."""
+        or being made into the 480p copy this device downloads. Also true
+        until the home server is known to be out of reach (no check-in
+        finished yet, or out of reach for under HOME_SERVER_OFFLINE_SECONDS),
+        so boot doesn't start transcoding before Wi-Fi has had a chance.
+        Background transcoding waits for all of that - downloads come first."""
         if self.sync_busy:
             return True
         activity = self.sync_activity
-        return bool(activity and activity.reachable and (activity.queued or activity.preparing))
+        if activity is None:
+            return False
+        if activity.reachable:
+            return bool(activity.queued or activity.preparing)
+        return self.home_server_pending
+
+    @property
+    def home_server_pending(self) -> bool:
+        """Whether this device is still finding out if the home server is
+        there (see home_server_has_work)."""
+        activity = self.sync_activity
+        if activity is None or activity.reachable:
+            return False
+        since = activity.unreachable_since
+        return since is None or time.monotonic() - since < HOME_SERVER_OFFLINE_SECONDS
 
     @property
     def activity_message(self) -> Optional[str]:
@@ -177,6 +199,10 @@ class PlaybackController:
         waiting = [m for m in self.movies
                    if m.id not in self.transcode_failed_movie_ids
                    and not self.library.transcode_path_for(m.id).exists()]
+        if waiting and self.home_server_pending:
+            return IdleActivity("Connecting", "Media server", None,
+                                "Downloads come first, then transcoding",
+                                color=_DOWNLOAD_COLOR)
         if waiting:
             others = len(waiting) - 1
             return IdleActivity("Transcoding", waiting[0].title, None,
