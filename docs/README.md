@@ -200,7 +200,9 @@ curl -X POST http://localhost:8000/api/rescan
 
 The service generates thumbnails in the background while playback is idle.
 It does not transcode: the media server makes the 480p copy the player
-downloads into `/content`.
+downloads into `/content`. When the server's copy is newer than what the
+player has (a movie downloaded as its full-size original, or a copy made
+with an older encoding), the player downloads it again and swaps it in.
 
 ## Update the device
 

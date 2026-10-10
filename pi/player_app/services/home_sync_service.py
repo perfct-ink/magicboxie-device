@@ -46,6 +46,12 @@ _TICKS_PER_SECOND = 10_000_000  # Jellyfin's RunTimeTicks unit is 100ns
 # the full-size file is downloaded and played as it is.
 _PLAYER_COPY_READY = "ready"
 _PLAYER_COPY_FAILED = "error"
+# The server versions its player copy encoding (MagicBoxiePlayerVersion); the
+# version of what's on disk is kept in the movie's metadata (0 for a
+# full-size original, or anything downloaded before versions existed). A
+# movie whose server copy is newer is downloaded again and swapped in, so
+# originals and copies made with an older encoding don't stay on the device.
+_PLAYER_VERSION_KEY = "player_copy_version"
 
 
 @dataclass
@@ -118,9 +124,12 @@ class HomeServerSync:
                 self.activity.preparing = []
                 return
 
-            existing_titles = {movie.title for movie in self._library.movies}
+            local_ids = {movie.title: movie.id for movie in self._library.movies}
             to_download = [m for m in remote_movies
-                           if m["Name"] not in existing_titles and not self._waiting_for_player_copy(m)]
+                           if m["Name"] not in local_ids and not self._waiting_for_player_copy(m)]
+            # New movies first; replacing ones already here can wait.
+            to_download += [m for m in remote_movies
+                            if m["Name"] in local_ids and self._has_newer_copy(m, local_ids[m["Name"]])]
             self.activity.queued = [m["Name"] for m in to_download]
 
             # Downloads take priority over everything else, playback included:
@@ -154,7 +163,7 @@ class HomeServerSync:
                         self.activity.queued = [m["Name"] for m in to_download[index + 1:]]
                         self._on_progress(movie["Name"])
                         try:
-                            if await self._download_movie(session, movie, headers):
+                            if await self._download_movie(session, movie, headers, replace_id=local_ids.get(movie["Name"])):
                                 self._pending_metadata.append(movie)
                         finally:
                             self.activity.bytes_done, self.activity.bytes_total = 0, None
@@ -240,9 +249,12 @@ class HomeServerSync:
         items = data.get("Items", [])
         return [item for item in items if item.get("MagicBoxieStatus") == _READY_STATUS]
 
-    async def _download_movie(self, session: aiohttp.ClientSession, movie: dict, headers: dict) -> bool:
+    async def _download_movie(self, session: aiohttp.ClientSession, movie: dict, headers: dict,
+                              replace_id: Optional[int] = None) -> bool:
+        """Downloads a movie into the library, or with replace_id, downloads
+        a newer player copy and swaps it in for that movie's file."""
         dest_path = self._library.root / self._local_filename(movie)
-        if dest_path.exists():
+        if dest_path.exists() and replace_id is None:
             return False
 
         logger.info("Home server check-in: downloading %r", movie["Name"])
@@ -275,7 +287,14 @@ class HomeServerSync:
                         chunk_started = time.monotonic()
                 if temporary.stat().st_size == 0:
                     return False
-                await run_io(publish_file, temporary, dest_path)
+                if replace_id is None:
+                    await run_io(publish_file, temporary, dest_path)
+                else:
+                    await run_io(self._library.replace_file, replace_id, temporary, dest_path.name)
+                    # Recorded now, not at the (possibly deferred) scan, so
+                    # the next check-in doesn't download it yet again.
+                    await run_io(self._library.save_metadata, replace_id,
+                                 **{_PLAYER_VERSION_KEY: self._player_version(movie)})
         except (aiohttp.ClientError, TimeoutError, OSError) as exc:
             logger.warning("Home server check-in: download of %r failed (%s)", movie["Name"], exc)
             return False
@@ -292,6 +311,17 @@ class HomeServerSync:
     def _is_player_copy(movie: dict) -> bool:
         return movie.get("MagicBoxiePlayerStatus") == _PLAYER_COPY_READY
 
+    @classmethod
+    def _player_version(cls, movie: dict) -> int:
+        """Version of the copy a download of this movie gets; 0 for the original."""
+        if not cls._is_player_copy(movie):
+            return 0
+        return int(movie.get("MagicBoxiePlayerVersion") or 0)
+
+    def _has_newer_copy(self, movie: dict, local_id: int) -> bool:
+        local_version = self._library.metadata_for(local_id).get(_PLAYER_VERSION_KEY) or 0
+        return self._player_version(movie) > local_version
+
     def _save_metadata(self, remote_movie: dict) -> None:
         local_movie = next(
             (m for m in self._library.movies if m.title == remote_movie["Name"]), None
@@ -304,6 +334,7 @@ class HomeServerSync:
             description=remote_movie.get("Overview") or "",
             year=int(remote_movie.get("ProductionYear") or 0),
             duration_seconds=int((remote_movie.get("RunTimeTicks") or 0) / _TICKS_PER_SECOND),
+            **{_PLAYER_VERSION_KEY: self._player_version(remote_movie)},
         )
 
     @staticmethod
@@ -317,6 +348,7 @@ class HomeServerSync:
             "MagicBoxieOriginalFilename": movie.get("MagicBoxieOriginalFilename") or movie.get("filename") or "",
             "MagicBoxieStatus": movie.get("MagicBoxieStatus") or movie.get("status") or _READY_STATUS,
             "MagicBoxiePlayerStatus": movie.get("MagicBoxiePlayerStatus"),
+            "MagicBoxiePlayerVersion": movie.get("MagicBoxiePlayerVersion") or 0,
         }
 
     @staticmethod
