@@ -61,6 +61,9 @@ class PlaybackController:
         self.currently_transcoding_movie_id: Optional[int] = None
         # How far into that movie the encode has got, from ffmpeg -progress.
         self.transcode_position_seconds: Optional[float] = None
+        # Movies TranscodeService gave up on (until restart); the idle
+        # screen doesn't wait on them.
+        self.transcode_failed_movie_ids: set = set()
         # Set/cleared by HomeServerSync, read by web_service.py's /api/status
         # - same hub pattern as currently_transcoding_movie_id above. A
         # title, not an id: the movie doesn't have a local id yet while
@@ -117,8 +120,8 @@ class PlaybackController:
         it's done), a download from the media server, a transcode here (only
         happens when the media server has nothing for this device, e.g. with
         no internet), then the media server's own transcode of a movie this
-        device is waiting for. None once everything is downloaded and
-        transcoded: the slideshow."""
+        device is waiting for, then any of those still waiting to start.
+        None once everything is downloaded and transcoded: the slideshow."""
         if self.is_updating:
             return IdleActivity("Updating", "Device software", None,
                                 "MagicBoxie restarts when it's done", color=_UPDATE_COLOR)
@@ -161,6 +164,24 @@ class PlaybackController:
                 detail,
                 color=_TRANSCODE_COLOR,
             )
+
+        # Work that's waiting rather than running - downloads between
+        # check-ins, or this device's transcode paused while the media
+        # server has movies for it - still isn't "everything done", so it
+        # keeps the card up instead of dropping back to the slideshow.
+        if activity and activity.reachable and activity.queued:
+            others = len(activity.queued) - 1
+            return IdleActivity("Downloading", activity.queued[0], None,
+                                "Waiting to start" + (f", {others} more after it" if others else ""),
+                                color=_DOWNLOAD_COLOR)
+        waiting = [m for m in self.movies
+                   if m.id not in self.transcode_failed_movie_ids
+                   and not self.library.transcode_path_for(m.id).exists()]
+        if waiting:
+            others = len(waiting) - 1
+            return IdleActivity("Transcoding", waiting[0].title, None,
+                                "Waiting to start" + (f", {others} more after it" if others else ""),
+                                movie_id=waiting[0].id, color=_TRANSCODE_COLOR)
         return None
 
     @property

@@ -69,10 +69,10 @@ def test_status_stays_idle_while_idle_screen_is_shown():
     assert state.movie_id is None
 
 
-def test_slideshow_steps_through_movies_only_while_idle():
+def test_slideshow_steps_through_movies_only_while_idle(tmp_path):
     async def scenario():
         mpv = FakeMpv()
-        controller = PlaybackController(FakeLibrary(), mpv)
+        controller = PlaybackController(_transcoded_library(tmp_path), mpv)
         seen = []
         await controller.advance_slideshow()
         seen.append(controller.slide_index)
@@ -240,6 +240,13 @@ def test_paused_movie_resumes_paused_on_its_last_frame_at_boot(tmp_path):
     assert restarted_player.position == 55
 
 
+def _transcoded_library(tmp_path):
+    """Both fake movies already transcoded: nothing left waiting."""
+    for movie_id in (0, 1):
+        (tmp_path / f"{movie_id}.mp4").touch()
+    return FakeLibrary(transcode_dir=tmp_path)
+
+
 def _activity(**fields):
     from player_app.services.home_sync_service import SyncActivity
     return SyncActivity(**fields)
@@ -247,7 +254,6 @@ def _activity(**fields):
 
 def test_idle_activity_prefers_downloading_then_transcoding_then_media_server(tmp_path):
     controller = PlaybackController(FakeLibrary(transcode_dir=tmp_path), FakeMpv())
-    assert controller.idle_activity is None
 
     controller.sync_activity = _activity(reachable=True, preparing=[
         {"title": "Queued", "status": "pending", "progress_percent": None},
@@ -282,17 +288,41 @@ def test_idle_activity_prefers_downloading_then_transcoding_then_media_server(tm
     assert (activity.heading, activity.title) == ("Updating", "Device software")
 
 
-def test_media_server_status_only_shows_while_it_is_reachable():
-    controller = PlaybackController(FakeLibrary(), FakeMpv())
+def test_waiting_work_keeps_the_card_up_instead_of_the_slideshow(tmp_path):
+    controller = PlaybackController(FakeLibrary(transcode_dir=tmp_path), FakeMpv())
+    # Nothing running, but neither movie is transcoded yet: transcode paused
+    # (e.g. while the media server has movies for this device).
+    activity = controller.idle_activity
+    assert (activity.heading, activity.title, activity.percent) == ("Transcoding", "A", None)
+    assert activity.detail == "Waiting to start, 1 more after it"
+
+    # A movie queued on the media server outranks the local transcode.
+    controller.sync_activity = _activity(reachable=True, queued=["Alpha", "Beta"])
+    activity = controller.idle_activity
+    assert (activity.heading, activity.title) == ("Downloading", "Alpha")
+    assert activity.detail == "Waiting to start, 1 more after it"
+
+    # Movies that failed to transcode don't hold the slideshow back.
+    controller.sync_activity = None
+    controller.transcode_failed_movie_ids.update({0, 1})
+    assert controller.idle_activity is None
+
+    controller.transcode_failed_movie_ids.clear()
+    _transcoded_library(tmp_path)
+    assert controller.idle_activity is None
+
+
+def test_media_server_status_only_shows_while_it_is_reachable(tmp_path):
+    controller = PlaybackController(_transcoded_library(tmp_path), FakeMpv())
     controller.sync_activity = _activity(reachable=False, preparing=[
         {"title": "Zeta", "status": "transcoding", "progress_percent": 40.0},
     ])
     assert controller.idle_activity is None
 
 
-def test_slideshow_holds_still_while_downloading():
+def test_slideshow_holds_still_while_downloading(tmp_path):
     async def scenario():
-        controller = PlaybackController(FakeLibrary(), FakeMpv())
+        controller = PlaybackController(_transcoded_library(tmp_path), FakeMpv())
         with patch("player_app.controllers.playback_controller.render_idle_screen") as render:
             await controller.advance_slideshow()
             assert controller.slide_index == 1

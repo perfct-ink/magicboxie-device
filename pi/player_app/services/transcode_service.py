@@ -49,7 +49,8 @@ class TranscodeService:
         # from "no transcoded file yet because every attempt has failed".
         # Cleared on restart, so a fixed/re-downloaded file does get another
         # chance eventually.
-        self._failed_movie_ids: set = set()
+        # Shared with the controller so the idle screen skips them too.
+        self._failed_movie_ids: set = controller.transcode_failed_movie_ids
 
     async def run(self, stop_event: asyncio.Event) -> None:
         while not stop_event.is_set():
