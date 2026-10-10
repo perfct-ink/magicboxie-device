@@ -373,6 +373,8 @@ def _activity_payload(controller: PlaybackController) -> dict:
     transcoding_id = controller.currently_transcoding_movie_id
     transcoding = None
     transcode_queue = []
+    # Gave up on until the player restarts; not waiting, so kept apart.
+    transcode_failed = []
     for movie in controller.movies:
         if movie.id == transcoding_id:
             position = controller.transcode_position_seconds
@@ -384,6 +386,8 @@ def _activity_payload(controller: PlaybackController) -> dict:
                 "duration_seconds": duration,
                 "percent": min(100.0, round(position / duration * 100, 1)) if position is not None and duration else None,
             }
+        elif movie.id in controller.transcode_failed_movie_ids:
+            transcode_failed.append({"id": movie.id, "title": movie.title})
         elif not controller.library.transcode_path_for(movie.id).exists():
             transcode_queue.append({"id": movie.id, "title": movie.title})
 
@@ -399,6 +403,7 @@ def _activity_payload(controller: PlaybackController) -> dict:
         "download_queue": list(activity.queued) if activity else [],
         "transcoding": transcoding,
         "transcode_queue": transcode_queue,
+        "transcode_failed": transcode_failed,
         "home_server": home_server,
         # Downloads and transcodes both wait while a movie plays.
         "paused_for_playback": not controller.is_idle,

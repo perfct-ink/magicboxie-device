@@ -241,15 +241,24 @@ async def _run_library_scan(controller: PlaybackController, stop_event: asyncio.
     finally:
         startup_decided.set()
     if controller.is_idle and not stop_event.is_set():
-        await controller.show_idle_screen()
+        await _show_idle_screen_logging_errors(controller)
     # Probes and frame grabs can wait until the user stops playback.
     while not stop_event.is_set():
         if controller.is_idle:
             await run_io(controller.library.scan)
             if controller.is_idle and not stop_event.is_set():
-                await controller.show_idle_screen()
+                await _show_idle_screen_logging_errors(controller)
             return
         await sleep_unless_stopped(stop_event, 5)
+
+
+async def _show_idle_screen_logging_errors(controller: PlaybackController) -> None:
+    """A slow mpv right after boot (its IPC reply times out) shouldn't take
+    the whole daemon down with it; the slideshow timer redraws shortly."""
+    try:
+        await controller.show_idle_screen()
+    except Exception:
+        logger.exception("Idle screen refresh failed")
 
 
 async def _run_playback(controller: PlaybackController, stop_event: asyncio.Event) -> None:

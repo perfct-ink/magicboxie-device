@@ -906,6 +906,6 @@ def test_activity_is_empty_when_nothing_is_happening(tmp_path):
 
     data = asyncio.run(scenario())
     assert data == {
-        "downloading": None, "download_queue": [], "transcoding": None, "transcode_queue": [],
+        "downloading": None, "download_queue": [], "transcoding": None, "transcode_queue": [], "transcode_failed": [],
         "home_server": None, "paused_for_playback": False,
     }

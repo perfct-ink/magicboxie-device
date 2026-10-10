@@ -358,6 +358,7 @@ function renderActivity(a) {
     : t.position_seconds ? fmt(t.position_seconds) + ' done' : 'starting') : '';
   activityGroup(body, 'Optimizing on this player', t ? [activityItem(t.title, tDetail, t.percent ?? 0)] : [], 'Nothing optimizing');
   activityGroup(body, 'Optimize queue', a.transcode_queue.map(m => activityItem(m.title, 'waiting')));
+  activityGroup(body, "Couldn't optimize", (a.transcode_failed || []).map(m => activityItem(m.title, 'failed')));
   const home = a.home_server;
   if (home) {
     const rows = home.preparing.map(m => activityItem(m.title,

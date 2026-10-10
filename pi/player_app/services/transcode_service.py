@@ -26,7 +26,10 @@ logger = logging.getLogger(__name__)
 FFMPEG_ENCODE_ARGS = [
     "-c:v", "libx264", "-profile:v", "baseline", "-level", "3.0",
     "-preset", "ultrafast", "-vf", "scale=480:-2",
-    "-c:a", "aac", "-b:a", "128k",
+    # Baseline is 8-bit 4:2:0 only (a 10-bit source otherwise fails), and
+    # the car has stereo speakers (5.1 otherwise fails the aac encoder).
+    "-pix_fmt", "yuv420p",
+    "-c:a", "aac", "-ac", "2", "-b:a", "128k",
 ]
 
 # How often to check whether playback has started while a transcode is
