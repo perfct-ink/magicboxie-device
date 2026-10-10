@@ -79,7 +79,7 @@ pi-ssh-deploy:
 		echo "Unpushed commits - push first, the Pi deploys from origin:"; \
 		git log origin/main..HEAD --oneline; exit 1; \
 	fi
-	ssh -o ServerAliveInterval=15 $(PI_HOST) 'cd $(PI_DIR) && make pi'
+	ssh -t -o ServerAliveInterval=15 $(PI_HOST) 'cd $(PI_DIR) && make pi'
 
 pi-ssh-logs:
 	ssh $(PI_HOST) 'cd $(PI_DIR) && make logs'
