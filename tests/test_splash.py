@@ -20,10 +20,17 @@ def test_pixels_match_framebuffer_depth():
     assert len(splash.pixel(16, 128)) == 2
 
 
-def test_spinner_rows_are_square_and_move_each_tick():
-    rows = splash.spinner_rows(32, 0)
-    assert len(rows) == splash.BOX and all(len(row) == splash.BOX * 4 for row in rows)
-    assert rows != splash.spinner_rows(32, 1)
+def test_dots_are_three_in_a_row_and_move_each_tick():
+    rows = splash.dots_rows(32, 0)
+    assert len(rows) == splash.DOTS_HEIGHT
+    assert all(len(row) == splash.DOTS_WIDTH * 4 for row in rows)
+    assert rows != splash.dots_rows(32, 1)
+    assert rows == splash.dots_rows(32, splash.DOTS)
+
+    middle = rows[splash.DOTS_HEIGHT // 2]
+    levels = [middle[x * 4] for x in range(splash.DOTS_WIDTH)]
+    centres = [splash.DOT_RADIUS + 1 + dot * splash.DOT_SPACING for dot in range(splash.DOTS)]
+    assert [levels[x] for x in centres] == [255, 70, 70]
 
 
 def test_player_gone_only_after_consecutive_stopped_polls():
@@ -35,13 +42,15 @@ def test_player_gone_only_after_consecutive_stopped_polls():
     assert next(states, None) is None
 
 
-def test_logo_rows_are_red_on_black():
+def test_logo_is_a_white_mb_on_red():
     rows = splash.logo_rows(32)
     width, height = splash.LOGO_SIZE
     assert len(rows) == height and all(len(row) == width * 4 for row in rows)
-    pixels = {bytes(row[i:i + 4]) for row in rows for i in range(0, len(row), 4)}
-    assert bytes(4) in pixels  # black around the letters
-    assert splash.color_pixel(32, *splash.LOGO_COLOR) in pixels  # solid red inside them
+    centre_row = rows[height // 2]
+    pixels = [tuple(centre_row[i:i + 4]) for i in range(0, len(centre_row), 4)]
+    assert any(b < 40 and g < 40 and r > 180 for b, g, r, _ in pixels)  # red square
+    assert any(min(b, g, r) > 230 for b, g, r, _ in pixels)  # white letters
+    assert rows[0][:4] == bytes(4)  # rounded corner on black
     assert len(splash.logo_rows(16)[0]) == width * 2
 
 

@@ -251,8 +251,8 @@ end, failed, or no longer exists is forgotten.
 
 ## Idle screen
 
-From power-on the boot loader (`splash.py`) shows the red MB logo with a
-spinner until the player puts its first picture up, and brings the logo back
+From power-on the boot loader (`splash.py`) shows the MB logo (the apps' mark) above
+three animated dots until the player puts its first picture up, and brings the logo back
 whenever the player restarts (after a self-update or a crash).
 
 On the 720x480 TV output the idle screen shows, in order of priority:
