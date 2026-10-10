@@ -241,9 +241,28 @@ update processes to the daemon through small JSON status files
 ## Boot playback
 
 The last played movie and its exact position are kept whether it was playing,
-paused or stopped (by the web page, the app or Escape), and across updates and
-reboots. Only a movie that played to its end, failed, or no longer exists is
-forgotten; the device then starts on the idle screen.
+paused or stopped, and across updates and reboots. A movie that was playing
+or paused (including one the player quit on with Escape, or one an update
+stopped) resumes at boot; a paused one comes back paused on its last frame.
+A movie stopped from the web page or the app does not resume at boot: the
+device starts on the idle screen, where its slide shows a progress bar and
+selecting it resumes at the saved position. Only a movie that played to its
+end, failed, or no longer exists is forgotten.
+
+## Idle screen
+
+On the 720x480 TV output the idle screen shows, in order of priority:
+
+1. **Downloading** a movie from the media server, with a progress bar and how
+   many more are queued.
+2. **Transcoding** a movie on the player (only when the media server has
+   nothing for it, e.g. with no internet), with how many more are waiting.
+3. **Transcoding** on the media server: a movie this player is waiting for,
+   while the media server is reachable.
+4. Otherwise the poster slideshow. Movies stopped partway have a red
+   progress bar along the bottom of the poster.
+
+The activity screens refresh their progress with each slideshow tick.
 
 After a reboot the daemon resumes the last movie at its saved position as
 fast as it can. It does not draw the idle screen at startup, since rendering

@@ -159,3 +159,55 @@ def test_sd_slide_shows_activity_in_red(tmp_path):
     image = _slide(tmp_path, FakeLibrary(), status_message="Updating device software")
     colors = image.crop((0, 368, 640, 480)).getcolors(maxcolors=1_000_000)
     assert any(r > 150 and g < 40 and b < 40 for _count, (r, g, b) in colors)
+
+
+def test_sd_slide_marks_a_movie_stopped_partway(tmp_path):
+    poster = tmp_path / "0.jpg"
+    Image.new("RGB", (400, 300), (255, 255, 255)).save(poster)
+    library = FakeLibrary(thumbnail_paths={0: poster})
+
+    def red_pixels(image):
+        return sum(1 for r, g, b in image.getdata() if r > 200 and g < 40 and b < 40)
+
+    plain = _slide(tmp_path, library)
+    marked = _slide(tmp_path, library, positions={0: 50})  # half of 100s
+    finished = _slide(tmp_path, library, positions={0: 100})
+    assert red_pixels(plain) == 0
+    assert red_pixels(finished) == 0
+    assert red_pixels(marked) > 0
+    # The bar sits on the poster's bottom edge, above the text area.
+    rows = [y for y in range(480) if any(
+        (lambda p: p[0] > 200 and p[1] < 40 and p[2] < 40)(marked.getpixel((x, y))) for x in range(640))]
+    assert max(rows) < 368
+
+
+def test_hd_grid_marks_a_movie_stopped_partway(tmp_path):
+    def red_pixels(**kwargs):
+        path = tmp_path / "grid.png"
+        render_idle_screen(FakeLibrary(), output_path=path, standard_definition=False, **kwargs)
+        with Image.open(path) as image:
+            return sum(1 for r, g, b in image.convert("RGB").getdata() if r > 200 and g < 40 and b < 40)
+
+    assert red_pixels() == 0
+    assert red_pixels(positions={1: 100}) > 0
+
+
+def test_sd_activity_screen_replaces_the_slide(tmp_path):
+    from player_app.views.idle_screen import IdleActivity
+
+    poster = tmp_path / "0.jpg"
+    Image.new("RGB", (400, 300), (255, 255, 255)).save(poster)
+    library = FakeLibrary(thumbnail_paths={0: poster})
+    activity = IdleActivity("Downloading", "Alpha", 50, "2 more to download", color=(245, 197, 66))
+
+    image = _slide(tmp_path, library, activity=activity)
+    assert image.size == (640, 480)
+    # No bright poster: just its dark backdrop behind the card.
+    assert image.getpixel((320, 30))[0] < 100
+    # The progress bar is half filled with the accent color.
+    bar_row = [image.getpixel((x, 249)) for x in range(640)]
+    accent = [x for x, (r, g, b) in enumerate(bar_row) if r > 200 and 150 < g < 230 and b < 110]
+    assert accent and 300 < max(accent) < 340
+
+    no_percent = _slide(tmp_path, library, activity=IdleActivity("Preparing", "Zeta"))
+    assert no_percent.size == (640, 480)

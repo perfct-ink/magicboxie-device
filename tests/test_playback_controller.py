@@ -198,7 +198,7 @@ def test_refresh_status_persists_playback_state(tmp_path):
     }
 
 
-def test_stopping_keeps_the_last_movie_and_position_for_resume(tmp_path):
+def test_stopped_movie_keeps_its_position_but_boot_shows_the_slideshow(tmp_path):
     state_path = tmp_path / "playback_state.json"
     player = FakeMpv()
 
@@ -209,11 +209,94 @@ def test_stopping_keeps_the_last_movie_and_position_for_resume(tmp_path):
         await controller.handle_command(Command(opcode=Opcode.STOP))
         assert controller.is_idle
         restarted = PlaybackController(FakeLibrary(), FakeMpv(), state_path=state_path)
-        assert await restarted.restore_last_playback()
+        assert not await restarted.restore_last_playback()
+        # The slideshow's progress marker and a later select still use it.
+        assert restarted.saved_position(1) == 77
 
     asyncio.run(scenario())
 
-    assert json.loads(state_path.read_text()) == {"movie_id": 1, "position_seconds": 77, "paused": False}
+    assert json.loads(state_path.read_text()) == {
+        "movie_id": 1, "position_seconds": 77, "paused": False, "stopped": True,
+    }
+
+
+def test_paused_movie_resumes_paused_on_its_last_frame_at_boot(tmp_path):
+    state_path = tmp_path / "playback_state.json"
+    player = FakeMpv()
+
+    async def scenario():
+        controller = PlaybackController(FakeLibrary(), player, state_path=state_path)
+        await controller.handle_command(Command(opcode=Opcode.SELECT_MOVIE, argument=1))
+        await controller.handle_command(Command(opcode=Opcode.PAUSE))
+        player.position = 55
+        await controller.save_position_now()
+        restarted_player = FakeMpv()
+        restarted = PlaybackController(FakeLibrary(), restarted_player, state_path=state_path)
+        assert await restarted.restore_last_playback()
+        return restarted_player
+
+    restarted_player = asyncio.run(scenario())
+    assert restarted_player.paused
+    assert restarted_player.position == 55
+
+
+def _activity(**fields):
+    from player_app.services.home_sync_service import SyncActivity
+    return SyncActivity(**fields)
+
+
+def test_idle_activity_prefers_downloading_then_transcoding_then_media_server(tmp_path):
+    controller = PlaybackController(FakeLibrary(transcode_dir=tmp_path), FakeMpv())
+    assert controller.idle_activity is None
+
+    controller.sync_activity = _activity(reachable=True, preparing=[
+        {"title": "Queued", "status": "pending", "progress_percent": None},
+        {"title": "Zeta", "status": "transcoding", "progress_percent": 40.5},
+    ])
+    activity = controller.idle_activity
+    assert (activity.heading, activity.title, activity.percent) == ("Transcoding", "Zeta", 40)
+    assert activity.detail == "On the media server, 1 more waiting"
+
+    controller.currently_transcoding_movie_id = 1
+    controller.transcode_position_seconds = 50.0
+    activity = controller.idle_activity
+    assert (activity.heading, activity.title, activity.percent, activity.movie_id) == ("Transcoding", "B", 25, 1)
+    assert activity.detail == "1 more to transcode"
+    assert controller.activity_message == "Transcoding B"
+
+    controller.currently_syncing_movie_title = "Alpha"
+    controller.sync_activity.bytes_done, controller.sync_activity.bytes_total = 30, 120
+    controller.sync_activity.queued = ["Beta", "Gamma"]
+    activity = controller.idle_activity
+    assert (activity.heading, activity.title, activity.percent) == ("Downloading", "Alpha", 25)
+    assert activity.detail == "2 more to download"
+
+    controller.status_message = "Updating device software"
+    assert controller.activity_message == "Updating device software"
+
+
+def test_media_server_status_only_shows_while_it_is_reachable():
+    controller = PlaybackController(FakeLibrary(), FakeMpv())
+    controller.sync_activity = _activity(reachable=False, preparing=[
+        {"title": "Zeta", "status": "transcoding", "progress_percent": 40.0},
+    ])
+    assert controller.idle_activity is None
+
+
+def test_slideshow_holds_still_while_downloading():
+    async def scenario():
+        controller = PlaybackController(FakeLibrary(), FakeMpv())
+        with patch("player_app.controllers.playback_controller.render_idle_screen") as render:
+            await controller.advance_slideshow()
+            assert controller.slide_index == 1
+            controller.currently_syncing_movie_title = "Alpha"
+            await controller.advance_slideshow()
+            assert controller.slide_index == 1
+            kwargs = render.call_args.kwargs
+            assert kwargs["activity"].title == "Alpha"
+            assert kwargs["positions"] == {0: 0, 1: 0}
+
+    asyncio.run(scenario())
 
 
 def test_player_becoming_idle_without_eof_clears_persisted_state(tmp_path):

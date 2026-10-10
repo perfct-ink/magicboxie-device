@@ -10,7 +10,7 @@ from typing import List, Optional
 
 from ..update_status import read_status
 from ..storage import read_dict, run_io, write_json
-from ..views.idle_screen import render_idle_screen
+from ..views.idle_screen import IdleActivity, render_idle_screen
 from ..models.library import MovieLibrary
 from ..views.player import MpvController
 from ..models.protocol import Command, Movie, Opcode, PlaybackState, PlaybackStatus
@@ -22,6 +22,9 @@ logger = logging.getLogger(__name__)
 # inactivity with nothing selected at all.
 PAUSE_DIM_PERCENT = 10
 PLAYBACK_SAVE_INTERVAL_SECONDS = 5
+# Accent colors for the idle screen's activity card (see idle_activity).
+_DOWNLOAD_COLOR = (245, 197, 66)
+_TRANSCODE_COLOR = (90, 200, 250)
 
 
 class PlaybackController:
@@ -97,15 +100,61 @@ class PlaybackController:
     def activity_message(self) -> Optional[str]:
         """What the device is busy doing, for the big banner on the idle
         screen: update/internet progress first, then downloads and
-        transcodes."""
+        transcodes. No percentages, so it only changes (and the idle screen
+        is only redrawn for it) when the step or the movie changes."""
         if self.status_message:
             return self.status_message
-        if self.currently_syncing_movie_title:
-            return f"Downloading {self.currently_syncing_movie_title}"
+        activity = self.idle_activity
+        if activity is None:
+            return None
+        return f"{activity.heading} {activity.title}"
+
+    @property
+    def idle_activity(self) -> Optional[IdleActivity]:
+        """What the idle screen shows in place of the slideshow, in priority
+        order: a download from the media server, a transcode here (only
+        happens when the media server has nothing for this device, e.g. with
+        no internet), then the media server's own transcode of a movie this
+        device is waiting for. None once everything is downloaded and
+        transcoded: the slideshow."""
+        activity = self.sync_activity
+        title = self.currently_syncing_movie_title
+        if title:
+            percent = None
+            if activity and activity.bytes_total:
+                percent = min(100, activity.bytes_done * 100 // activity.bytes_total)
+            queued = len(activity.queued) if activity else 0
+            return IdleActivity("Downloading", title, percent,
+                                f"{queued} more to download" if queued else None,
+                                color=_DOWNLOAD_COLOR)
+
         movie_id = self.currently_transcoding_movie_id
         if movie_id is not None:
             movie = next((m for m in self.movies if m.id == movie_id), None)
-            return f"Optimizing {movie.title}" if movie else "Optimizing a movie"
+            percent = None
+            position = self.transcode_position_seconds
+            if movie and movie.duration_seconds and position is not None:
+                percent = min(100, int(position * 100 // movie.duration_seconds))
+            waiting = sum(1 for m in self.movies
+                          if m.id != movie_id and not self.library.transcode_path_for(m.id).exists())
+            return IdleActivity("Transcoding", movie.title if movie else "a movie", percent,
+                                f"{waiting} more to transcode" if waiting else None,
+                                movie_id=movie_id, color=_TRANSCODE_COLOR)
+
+        if activity and activity.reachable and activity.preparing:
+            preparing = activity.preparing
+            item = next((p for p in preparing if p.get("status") == "transcoding"), preparing[0])
+            transcoding = item.get("status") == "transcoding"
+            percent = item.get("progress_percent")
+            others = len(preparing) - 1
+            detail = "On the media server" + (f", {others} more waiting" if others else ", downloads when ready")
+            return IdleActivity(
+                "Transcoding" if transcoding else "Preparing",
+                item.get("title") or "a movie",
+                int(percent) if transcoding and percent is not None else None,
+                detail,
+                color=_TRANSCODE_COLOR,
+            )
         return None
 
     @property
@@ -168,7 +217,7 @@ class PlaybackController:
             await self.player.show_pause_icon()
             await self.player.set_dim(PAUSE_DIM_PERCENT)
         elif cmd.opcode == Opcode.STOP:
-            await self._stop_and_show_idle_screen()
+            await self._stop_and_show_idle_screen(stopped_by_user=True)
         elif cmd.opcode == Opcode.SEEK and cmd.argument is not None:
             await self.player.seek(cmd.argument)
         elif cmd.opcode == Opcode.SHUTDOWN:
@@ -201,10 +250,13 @@ class PlaybackController:
                 await self.player.show_image(image_path)
 
     async def advance_slideshow(self) -> None:
-        """Steps the SD idle screen on to the next movie's slide."""
+        """Steps the SD idle screen on to the next movie's slide. While a
+        download or transcode is shown instead, stays put and just redraws,
+        which keeps its progress bar current."""
         if not self.is_idle:
             return
-        self.slide_index = (self.slide_index + 1) % max(1, len(self.library.movies))
+        if self.idle_activity is None:
+            self.slide_index = (self.slide_index + 1) % max(1, len(self.library.movies))
         await self.show_idle_screen()
 
     async def _render_idle_screen(self) -> Path:
@@ -214,8 +266,11 @@ class PlaybackController:
             return await run_io(render_idle_screen, self.library,
                                 syncing_title=self.currently_syncing_movie_title,
                                 keyboard_names=list(self.keyboard_names),
-                                status_message=self.activity_message,
-                                slide_index=self.slide_index)
+                                status_message=self.status_message,
+                                slide_index=self.slide_index,
+                                activity=self.idle_activity,
+                                positions={movie.id: self.saved_position(movie.id)
+                                           for movie in self.movies})
 
     async def _show_idle_screen_locked(self) -> None:
         image_path = await self._render_idle_screen()
@@ -224,20 +279,22 @@ class PlaybackController:
     async def stop_and_show_idle_screen(self) -> None:
         self.last_input_at = time.monotonic()
         async with self._lock:
-            await self._stop_and_show_idle_screen()
+            await self._stop_and_show_idle_screen(stopped_by_user=True)
 
-    async def _stop_and_show_idle_screen(self) -> None:
-        """What both an explicit stop command and the local keyboard's
-        Escape key do - stop whatever's playing and return to the thumbnail
-        grid, so the screen never just goes blank or freezes on the last
-        frame. The movie and its exact position stay saved: after an update
-        or reboot the device resumes the last played movie even if it was
-        stopped (only one that played to its end or failed is forgotten)."""
+    async def _stop_and_show_idle_screen(self, stopped_by_user: bool = False) -> None:
+        """What an explicit stop command does, and what an update install
+        does to whatever is playing - stop it and return to the idle
+        screen, so the screen never just goes blank or freezes on the last
+        frame. The movie's exact position stays saved either way (the
+        slideshow marks it with a progress bar and selecting it resumes
+        there). After an update restart the device resumes that movie; one
+        the user stopped is not resumed at boot, the slideshow shows instead.
+        Only one that played to its end or failed is forgotten."""
         movie_id = self._current_movie_id
         if movie_id is not None and not (self.player.finished or self.player.failed or self.player.loading):
             position = await self.player.get_position()
             self._last_checkpoint_at = None
-            await run_io(self._save_playback_state, movie_id, position, False)
+            await run_io(self._save_playback_state, movie_id, position, False, stopped_by_user)
         else:
             await run_io(self._clear_playback_state)
         await self._remember_position()
@@ -363,7 +420,8 @@ class PlaybackController:
             position = await self.player.get_position()
             await run_io(self._set_position, self._current_movie_id, position)
 
-    def _save_playback_state(self, movie_id: int, position_seconds: int, paused: bool) -> None:
+    def _save_playback_state(self, movie_id: int, position_seconds: int, paused: bool,
+                             stopped: bool = False) -> None:
         now = time.monotonic()
         if (self._last_checkpoint_movie_id == movie_id
                 and self._last_checkpoint_at is not None
@@ -372,16 +430,16 @@ class PlaybackController:
         self._last_checkpoint_at = now
         self._last_checkpoint_movie_id = movie_id
         self._set_position(movie_id, position_seconds)
-        state = (movie_id, position_seconds, paused)
+        state = (movie_id, position_seconds, paused, stopped)
         if self._state_path is None or state == self._last_saved_state:
             return
+        data = {"movie_id": movie_id, "position_seconds": position_seconds, "paused": paused}
+        if stopped:
+            # Stopped by the user: boot shows the slideshow, not this movie.
+            data["stopped"] = True
         try:
             self._state_path.parent.mkdir(parents=True, exist_ok=True)
-            write_json(self._state_path, {
-                "movie_id": movie_id,
-                "position_seconds": position_seconds,
-                "paused": paused,
-            })
+            write_json(self._state_path, data)
             self._last_saved_state = state
         except OSError:
             logger.warning("Failed to persist playback state to %s", self._state_path)
@@ -414,9 +472,16 @@ class PlaybackController:
             movie_id = int(data["movie_id"])
             position_seconds = int(data["position_seconds"])
             paused = bool(data["paused"])
+            stopped = bool(data.get("stopped", False))
         except (OSError, ValueError, KeyError, TypeError):
             logger.warning("Failed to read persisted playback state from %s - ignoring", self._state_path)
             await run_io(self._clear_playback_state)
+            return False
+
+        if stopped:
+            # Its position is still in movie_positions.json, so the slideshow
+            # marks it and selecting it resumes where it was stopped.
+            logger.info("Last movie %d was stopped - starting on the idle screen", movie_id)
             return False
 
         if not any(movie.id == movie_id for movie in self.movies):

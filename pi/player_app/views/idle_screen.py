@@ -1,15 +1,18 @@
 """Builds the "home screen" image shown on the device's own HDMI output
 whenever nothing is playing: a grid of every movie's thumbnail (plus title)
 on an HD screen, or one full-screen slide per movie on the default 720x480
-TV output, which the controller steps through as a slideshow. mpv can only display one image or video at a
+TV output, which the controller steps through as a slideshow. While the
+device is downloading or transcoding, the TV output shows that instead of
+the slideshow (see IdleActivity). mpv can only display one image or video at a
 time, not a live interactive UI, so this is regenerated and loaded as an
 ordinary (very long-lived) "file" whenever the device needs to show it.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
-from typing import Sequence
+from typing import Mapping, Optional, Sequence
 
 from PIL import Image, ImageDraw, ImageEnhance, ImageFont, ImageOps
 
@@ -97,6 +100,33 @@ _SLIDE_INFO_FONT_SIZE = 20
 _SLIDE_INFO_COLOR = (170, 170, 170)
 _BOLD_FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 
+# "Watched partway" marker under a poster, like the web page's progress bar.
+_PROGRESS_HEIGHT = 8
+_PROGRESS_TRACK = (70, 70, 70)
+_PROGRESS_FILL = (229, 9, 20)
+
+# SD activity screen (downloading/transcoding), shown instead of the slideshow.
+_ACTIVITY_HEADING_FONT_SIZE = 44
+_ACTIVITY_TITLE_FONT_SIZE = 30
+_ACTIVITY_BAR_WIDTH = 440
+_ACTIVITY_BAR_HEIGHT = 18
+_ACTIVITY_PERCENT_FONT_SIZE = 26
+_ACTIVITY_TRACK = (60, 60, 60)
+
+
+@dataclass(frozen=True)
+class IdleActivity:
+    """What the device is busy with while idle, drawn full-screen on the TV
+    output in place of the slideshow: downloading from the media server,
+    transcoding here, or waiting on the media server's own transcode."""
+    heading: str
+    title: str
+    percent: Optional[int] = None
+    detail: Optional[str] = None
+    # The movie whose poster goes behind it, once it's in the library.
+    movie_id: Optional[int] = None
+    color: tuple = _SYNC_DOT_COLOR
+
 
 def _load_caption_font() -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     try:
@@ -120,6 +150,8 @@ def render_idle_screen(
     status_message: str | None = None,
     slide_index: int = 0,
     standard_definition: bool = _SD,
+    activity: Optional[IdleActivity] = None,
+    positions: Optional[Mapping[int, int]] = None,
 ) -> Path:
     """(Re)builds the grid from the library's current movies/thumbnails.
     Cheap enough - a handful of small images composited together - to just
@@ -127,14 +159,23 @@ def render_idle_screen(
     invalidating it as the library changes. keyboard_names (None = unknown,
     draws nothing) adds a footer saying whether a keyboard is detected.
     In standard definition it instead draws the single slide for movie
-    slide_index (wrapping around)."""
+    slide_index (wrapping around), or the activity screen while there is
+    one. positions (movie id -> saved resume seconds) adds a progress
+    marker under every movie that was stopped partway."""
+    positions = positions or {}
     if standard_definition:
-        canvas = _render_slide(library, slide_index, syncing_title, keyboard_names, status_message)
+        if activity is not None:
+            canvas = _render_activity_slide(library, activity, status_message)
+        else:
+            canvas = _render_slide(library, slide_index, syncing_title, keyboard_names,
+                                   status_message, positions)
         image_bytes = BytesIO()
         canvas.save(image_bytes, format="PNG", compress_level=1)
         atomic_write(output_path, image_bytes.getvalue())
         return output_path
 
+    if activity is not None and not status_message:
+        status_message = f"{activity.heading} {activity.title}"
     movies = library.movies
     columns = _COLUMNS if movies else 1
     rows = max(1, -(-len(movies) // columns))  # ceil division
@@ -157,6 +198,11 @@ def render_idle_screen(
         thumbnail_path = library.thumbnail_path_for(movie.id)
         if thumbnail_path is not None:
             _paste_thumbnail(canvas, thumbnail_path, cell_x, cell_y)
+        fraction = _watched_fraction(movie, positions)
+        if fraction is not None:
+            bar_y = cell_y + _CELL_PADDING + _THUMBNAIL_MAX_SIZE[1] - _PROGRESS_HEIGHT
+            _draw_progress(draw, cell_x + _CELL_PADDING, bar_y,
+                           _THUMBNAIL_MAX_SIZE[0], fraction)
 
         _draw_caption(draw, movie.title, cell_x, cell_y, font)
 
@@ -179,6 +225,7 @@ def _render_slide(
     syncing_title: str | None,
     keyboard_names: Sequence[str] | None,
     status_message: str | None,
+    positions: Mapping[int, int],
 ) -> Image.Image:
     width, height = SLIDE_SIZE
     poster_bottom = height - _SLIDE_TEXT_HEIGHT
@@ -195,8 +242,14 @@ def _render_slide(
         title = movie.title
         info = (f"{index + 1} of {len(movies)}", _SLIDE_INFO_COLOR)
         thumbnail_path = library.thumbnail_path_for(movie.id)
+        poster_box = None
         if thumbnail_path is not None:
-            _paste_slide_poster(canvas, thumbnail_path, poster_bottom)
+            poster_box = _paste_slide_poster(canvas, thumbnail_path, poster_bottom)
+        fraction = _watched_fraction(movie, positions)
+        if fraction is not None:
+            # Along the poster's bottom edge, or where it would be.
+            left, right, bottom = poster_box or (_SLIDE_SAFE_X, width - _SLIDE_SAFE_X, poster_bottom - 10)
+            _draw_progress(draw, left, bottom - _PROGRESS_HEIGHT, right - left, fraction)
     else:
         title = "No movies yet"
         info = ("Movies you add will show up here", _SLIDE_INFO_COLOR)
@@ -229,25 +282,102 @@ def _render_slide(
     return canvas
 
 
-def _paste_slide_poster(canvas: Image.Image, thumbnail_path: Path, poster_bottom: int) -> None:
+def _paste_slide_poster(canvas: Image.Image, thumbnail_path: Path, poster_bottom: int):
     """The poster as large as it fits above the text area, over a dark,
-    blurred copy of itself so its edges don't float on flat black."""
-    try:
-        with Image.open(thumbnail_path) as source:
-            poster = source.convert("RGB")
-    except OSError:
-        return
+    blurred copy of itself so its edges don't float on flat black. Returns
+    the poster's (left, right, bottom), or None if it couldn't be read."""
+    poster = _paste_backdrop(canvas, thumbnail_path, poster_bottom, 0.35)
+    if poster is None:
+        return None
     width = canvas.width
-    # Blurring a tiny copy and scaling it up is far cheaper on the Pi Zero
-    # than a real blur at full size, and looks the same.
-    backdrop = ImageOps.fit(poster, (32, 24)).resize((width, poster_bottom), Image.BILINEAR)
-    canvas.paste(ImageEnhance.Brightness(backdrop).enhance(0.35), (0, 0))
-
     box = (width - 2 * _SLIDE_SAFE_X, poster_bottom - _SLIDE_SAFE_Y - 10)
     scale = min(box[0] / poster.width, box[1] / poster.height)
     size = (max(1, round(poster.width * scale)), max(1, round(poster.height * scale)))
     poster = poster.resize(size, Image.BILINEAR)
-    canvas.paste(poster, ((width - size[0]) // 2, _SLIDE_SAFE_Y + (box[1] - size[1]) // 2))
+    left, top = (width - size[0]) // 2, _SLIDE_SAFE_Y + (box[1] - size[1]) // 2
+    canvas.paste(poster, (left, top))
+    return left, left + size[0], top + size[1]
+
+
+def _paste_backdrop(canvas: Image.Image, thumbnail_path: Path, height: int, brightness: float):
+    """Fills the top `height` rows with a dark, blurred copy of the poster
+    and returns the poster itself (None if it can't be read)."""
+    try:
+        with Image.open(thumbnail_path) as source:
+            poster = source.convert("RGB")
+    except OSError:
+        return None
+    # Blurring a tiny copy and scaling it up is far cheaper on the Pi Zero
+    # than a real blur at full size, and looks the same.
+    backdrop = ImageOps.fit(poster, (32, 24)).resize((canvas.width, height), Image.BILINEAR)
+    canvas.paste(ImageEnhance.Brightness(backdrop).enhance(brightness), (0, 0))
+    return poster
+
+
+def _render_activity_slide(
+    library: MovieLibrary, activity: IdleActivity, status_message: str | None,
+) -> Image.Image:
+    """Full-screen "Downloading" / "Transcoding" card: what, which movie,
+    how far along, and what's left after it."""
+    width, height = SLIDE_SIZE
+    canvas = Image.new("RGB", SLIDE_SIZE, _BACKGROUND)
+    if activity.movie_id is not None:
+        thumbnail_path = library.thumbnail_path_for(activity.movie_id)
+        if thumbnail_path is not None:
+            _paste_backdrop(canvas, thumbnail_path, height, 0.25)
+    draw = ImageDraw.Draw(canvas)
+    text_width = width - 2 * _SLIDE_SAFE_X
+
+    def centered(text, font, y, color):
+        text = _truncate_to_width(text, draw, font, text_width)
+        draw.text(((width - draw.textlength(text, font=font)) / 2, y), text, fill=color, font=font)
+
+    centered(activity.heading, _load_font(_BOLD_FONT_PATH, _ACTIVITY_HEADING_FONT_SIZE), 96, activity.color)
+    centered(activity.title, _load_font(_BOLD_FONT_PATH, _ACTIVITY_TITLE_FONT_SIZE), 170, _BANNER_COLOR)
+
+    if activity.percent is not None:
+        left = (width - _ACTIVITY_BAR_WIDTH) // 2
+        top = 240
+        bottom = top + _ACTIVITY_BAR_HEIGHT
+        radius = _ACTIVITY_BAR_HEIGHT // 2
+        draw.rounded_rectangle((left, top, left + _ACTIVITY_BAR_WIDTH, bottom), radius=radius, fill=_ACTIVITY_TRACK)
+        filled = round(_ACTIVITY_BAR_WIDTH * max(0, min(100, activity.percent)) / 100)
+        if filled > 0:
+            draw.rounded_rectangle((left, top, left + max(filled, _ACTIVITY_BAR_HEIGHT), bottom),
+                                   radius=radius, fill=activity.color)
+        centered(f"{activity.percent}%", _load_font(_CAPTION_FONT_PATH, _ACTIVITY_PERCENT_FONT_SIZE),
+                 bottom + 14, _BANNER_COLOR)
+
+    info_font = _load_font(_CAPTION_FONT_PATH, _SLIDE_INFO_FONT_SIZE)
+    info_y = height - _SLIDE_SAFE_Y - _SLIDE_INFO_FONT_SIZE - 6
+    if status_message:
+        info_text = _truncate_to_width(status_message, draw, info_font, text_width - 24)
+        info_width = draw.textlength(info_text, font=info_font)
+        info_x = (width - info_width) / 2
+        draw.rounded_rectangle(
+            (info_x - 12, info_y - 5, info_x + info_width + 12, info_y + _SLIDE_INFO_FONT_SIZE + 7),
+            radius=8, fill=_BANNER_BACKGROUND,
+        )
+        draw.text((info_x, info_y), info_text, fill=_BANNER_COLOR, font=info_font)
+    elif activity.detail:
+        centered(activity.detail, info_font, info_y, _SLIDE_INFO_COLOR)
+    return canvas
+
+
+def _watched_fraction(movie, positions: Mapping[int, int]) -> Optional[float]:
+    """How far into the movie its saved resume point is, or None if it was
+    never started (or finished, which clears the position)."""
+    position = positions.get(movie.id, 0)
+    duration = movie.duration_seconds
+    if position <= 0 or not duration or position >= duration:
+        return None
+    return position / duration
+
+
+def _draw_progress(draw: ImageDraw.ImageDraw, left: int, top: int, width: int, fraction: float) -> None:
+    draw.rectangle((left, top, left + width - 1, top + _PROGRESS_HEIGHT - 1), fill=_PROGRESS_TRACK)
+    filled = max(_PROGRESS_HEIGHT, round(width * fraction))
+    draw.rectangle((left, top, left + filled - 1, top + _PROGRESS_HEIGHT - 1), fill=_PROGRESS_FILL)
 
 
 def _load_font(path: str, size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
