@@ -33,3 +33,22 @@ def test_player_gone_only_after_consecutive_stopped_polls():
             patch.object(splash.time, "sleep"):
         splash.wait_for_player_to_go()
     assert next(states, None) is None
+
+
+def test_logo_rows_are_red_on_black():
+    rows = splash.logo_rows(32)
+    width, height = splash.LOGO_SIZE
+    assert len(rows) == height and all(len(row) == width * 4 for row in rows)
+    pixels = {bytes(row[i:i + 4]) for row in rows for i in range(0, len(row), 4)}
+    assert bytes(4) in pixels  # black around the letters
+    assert splash.color_pixel(32, *splash.LOGO_COLOR) in pixels  # solid red inside them
+    assert len(splash.logo_rows(16)[0]) == width * 2
+
+
+def test_logo_comes_back_while_the_player_restarts():
+    from unittest.mock import patch
+    states = iter(["active", "deactivating", "activating", "active", "inactive", "inactive", "inactive"])
+    with patch.object(splash, "player_state", side_effect=lambda: next(states)), \
+            patch.object(splash.time, "sleep"), patch.object(splash, "redraw_logo") as redraw:
+        splash.wait_for_player_to_go()
+    assert redraw.call_count == 2

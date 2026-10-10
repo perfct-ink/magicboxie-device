@@ -251,15 +251,21 @@ end, failed, or no longer exists is forgotten.
 
 ## Idle screen
 
+From power-on the boot loader (`splash.py`) shows the red MB logo with a
+spinner until the player puts its first picture up, and brings the logo back
+whenever the player restarts (after a self-update or a crash).
+
 On the 720x480 TV output the idle screen shows, in order of priority:
 
-1. **Downloading** a movie from the media server, with a progress bar and how
+1. **Updating** while a software update installs; the logo follows while the
+   player restarts.
+2. **Downloading** a movie from the media server, with a progress bar and how
    many more are queued.
-2. **Transcoding** a movie on the player (only when the media server has
+3. **Transcoding** a movie on the player (only when the media server has
    nothing for it, e.g. with no internet), with how many more are waiting.
-3. **Transcoding** on the media server: a movie this player is waiting for,
+4. **Transcoding** on the media server: a movie this player is waiting for,
    while the media server is reachable.
-4. Otherwise the poster slideshow. Movies stopped partway have a red
+5. Otherwise the poster slideshow. Movies stopped partway have a red
    progress bar along the bottom of the poster.
 
 The activity screens refresh their progress with each slideshow tick.

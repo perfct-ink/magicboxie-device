@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 from typing import List, Optional
 
-from ..update_status import read_status
+from ..update_status import MESSAGES as UPDATE_MESSAGES, read_status
 from ..storage import read_dict, run_io, write_json
 from ..views.idle_screen import IdleActivity, render_idle_screen
 from ..models.library import MovieLibrary
@@ -25,6 +25,7 @@ PLAYBACK_SAVE_INTERVAL_SECONDS = 5
 # Accent colors for the idle screen's activity card (see idle_activity).
 _DOWNLOAD_COLOR = (245, 197, 66)
 _TRANSCODE_COLOR = (90, 200, 250)
+_UPDATE_COLOR = (255, 255, 255)
 
 
 class PlaybackController:
@@ -112,11 +113,16 @@ class PlaybackController:
     @property
     def idle_activity(self) -> Optional[IdleActivity]:
         """What the idle screen shows in place of the slideshow, in priority
-        order: a download from the media server, a transcode here (only
+        order: a software update being installed (the player restarts when
+        it's done), a download from the media server, a transcode here (only
         happens when the media server has nothing for this device, e.g. with
         no internet), then the media server's own transcode of a movie this
         device is waiting for. None once everything is downloaded and
         transcoded: the slideshow."""
+        if self.is_updating:
+            return IdleActivity("Updating", "Device software", None,
+                                "MagicBoxie restarts when it's done", color=_UPDATE_COLOR)
+
         activity = self.sync_activity
         title = self.currently_syncing_movie_title
         if title:
@@ -156,6 +162,11 @@ class PlaybackController:
                 color=_TRANSCODE_COLOR,
             )
         return None
+
+    @property
+    def is_updating(self) -> bool:
+        return (self._software_update_phase == "installing"
+                or self.status_message == UPDATE_MESSAGES["installing"])
 
     @property
     def update_status(self) -> Optional[str]:
@@ -266,7 +277,8 @@ class PlaybackController:
             return await run_io(render_idle_screen, self.library,
                                 syncing_title=self.currently_syncing_movie_title,
                                 keyboard_names=list(self.keyboard_names),
-                                status_message=self.status_message,
+                                # The update card already says it.
+                                status_message=None if self.is_updating else self.status_message,
                                 slide_index=self.slide_index,
                                 activity=self.idle_activity,
                                 positions={movie.id: self.saved_position(movie.id)

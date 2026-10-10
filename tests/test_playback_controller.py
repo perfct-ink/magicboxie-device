@@ -271,8 +271,15 @@ def test_idle_activity_prefers_downloading_then_transcoding_then_media_server(tm
     assert (activity.heading, activity.title, activity.percent) == ("Downloading", "Alpha", 25)
     assert activity.detail == "2 more to download"
 
+    controller.status_message = "Checking for updates\u2026"
+    assert controller.idle_activity.heading == "Downloading"
+    assert controller.activity_message == "Checking for updates\u2026"
+
+    # Installing an update outranks everything.
     controller.status_message = "Updating device software"
     assert controller.activity_message == "Updating device software"
+    activity = controller.idle_activity
+    assert (activity.heading, activity.title) == ("Updating", "Device software")
 
 
 def test_media_server_status_only_shows_while_it_is_reachable():
