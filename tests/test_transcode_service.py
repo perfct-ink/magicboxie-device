@@ -298,5 +298,23 @@ def test_transcoding_waits_while_the_home_server_has_movies_for_this_device(tmp_
     assert not service._may_run()
     activity.queued, activity.preparing = [], [{"title": "Being Made 480p", "status": "transcoding"}]
     assert not service._may_run()
-    activity.reachable = False  # left home: back to transcoding
+    activity.mark_unreachable()  # left home: back to transcoding once it's clearly gone
+    assert not service._may_run()
+    activity.unreachable_since -= 120
     assert service._may_run()
+
+
+def test_transcoding_waits_for_the_first_home_server_check_in(tmp_path):
+    from player_app.services.home_sync_service import SyncActivity
+
+    controller = PlaybackController(FakeLibrary(transcode_dir=tmp_path), FakeMpv())
+    service = TranscodeService(controller)
+    assert service._may_run()  # no home server configured: transcode right away
+    controller.sync_activity = activity = SyncActivity()
+    assert not service._may_run()  # boot: Wi-Fi may still be joining
+    assert controller.idle_activity.heading == "Connecting"
+    activity.mark_unreachable()
+    assert not service._may_run()  # one failed look isn't "offline" yet
+    activity.unreachable_since -= 120
+    assert service._may_run()  # offline: transcode here
+    assert controller.idle_activity.heading == "Transcoding"
