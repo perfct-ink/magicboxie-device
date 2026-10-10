@@ -252,7 +252,7 @@ def _activity(**fields):
     return SyncActivity(**fields)
 
 
-def test_idle_activity_prefers_downloading_then_transcoding_then_media_server(tmp_path):
+def test_idle_activity_prefers_downloading_then_media_server(tmp_path):
     controller = PlaybackController(FakeLibrary(transcode_dir=tmp_path), FakeMpv())
 
     controller.sync_activity = _activity(reachable=True, preparing=[
@@ -262,13 +262,6 @@ def test_idle_activity_prefers_downloading_then_transcoding_then_media_server(tm
     activity = controller.idle_activity
     assert (activity.heading, activity.title, activity.percent) == ("Transcoding", "Zeta", 40)
     assert activity.detail == "On the media server, 1 more waiting"
-
-    controller.currently_transcoding_movie_id = 1
-    controller.transcode_position_seconds = 50.0
-    activity = controller.idle_activity
-    assert (activity.heading, activity.title, activity.percent, activity.movie_id) == ("Transcoding", "B", 25, 1)
-    assert activity.detail == "1 more to transcode"
-    assert controller.activity_message == "Transcoding B"
 
     controller.currently_syncing_movie_title = "Alpha"
     controller.sync_activity.bytes_done, controller.sync_activity.bytes_total = 30, 120
@@ -281,6 +274,11 @@ def test_idle_activity_prefers_downloading_then_transcoding_then_media_server(tm
     assert controller.idle_activity.heading == "Downloading"
     assert controller.activity_message == "Checking for updates\u2026"
 
+    # Too hot outranks downloads, but not an update in progress.
+    controller.thermal_note = "Too hot (82\u00b0C)."
+    controller.status_message = None
+    assert controller.activity_message == "Too hot (82\u00b0C)."
+
     # Installing an update outranks everything.
     controller.status_message = "Updating device software"
     assert controller.activity_message == "Updating device software"
@@ -288,28 +286,15 @@ def test_idle_activity_prefers_downloading_then_transcoding_then_media_server(tm
     assert (activity.heading, activity.title) == ("Updating", "Device software")
 
 
-def test_waiting_work_keeps_the_card_up_instead_of_the_slideshow(tmp_path):
+def test_waiting_downloads_keep_the_card_up_instead_of_the_slideshow(tmp_path):
     controller = PlaybackController(FakeLibrary(transcode_dir=tmp_path), FakeMpv())
-    # Nothing running, but neither movie is transcoded yet: transcode paused
-    # (e.g. while the media server has movies for this device).
-    activity = controller.idle_activity
-    assert (activity.heading, activity.title, activity.percent) == ("Transcoding", "A", None)
-    assert activity.detail == "Waiting to start, 1 more after it"
+    # Nothing local to wait for any more: the slideshow.
+    assert controller.idle_activity is None
 
-    # A movie queued on the media server outranks the local transcode.
     controller.sync_activity = _activity(reachable=True, queued=["Alpha", "Beta"])
     activity = controller.idle_activity
     assert (activity.heading, activity.title) == ("Downloading", "Alpha")
     assert activity.detail == "Waiting to start, 1 more after it"
-
-    # Movies that failed to transcode don't hold the slideshow back.
-    controller.sync_activity = None
-    controller.transcode_failed_movie_ids.update({0, 1})
-    assert controller.idle_activity is None
-
-    controller.transcode_failed_movie_ids.clear()
-    _transcoded_library(tmp_path)
-    assert controller.idle_activity is None
 
 
 def test_media_server_status_only_shows_while_it_is_reachable(tmp_path):

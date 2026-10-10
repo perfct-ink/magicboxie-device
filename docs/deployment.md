@@ -227,7 +227,7 @@ reports that it is not permitted.
 | --- | --- | --- |
 | `magicboxie-wifi-startup` | oneshot, at boot | Restores saved profiles; 30 s for saved Wi-Fi, else starts the hotspot |
 | `magicboxie-hotspot` | long-running | Open AP `MagicBoxie Player` (10.42.0.1) plus dnsmasq for DHCP and captive-portal DNS |
-| `magicboxie-player` | long-running | The daemon: mpv, BLE, web/API, mDNS, transcoding, home-server sync |
+| `magicboxie-player` | long-running | The daemon: mpv, BLE, web/API, mDNS, temperature check, home-server sync |
 | `magicboxie-boot-update` | oneshot, at boot | Polls for internet up to 30 s at lowest CPU/IO priority, then queues a self-update |
 | `magicboxie-self-update` | oneshot | Pulls and, if there is new code, installs it at once; started by startup, boot-update and the timer |
 | `magicboxie-self-update.timer` | timer | Daily run, up to 1 h random delay, catches up missed runs |
@@ -261,11 +261,9 @@ On the 720x480 TV output the idle screen shows, in order of priority:
    player restarts.
 2. **Downloading** a movie from the media server, with a progress bar and how
    many more are queued.
-3. **Transcoding** a movie on the player (only when the media server has
-   nothing for it, e.g. with no internet), with how many more are waiting.
-4. **Transcoding** on the media server: a movie this player is waiting for,
+3. **Transcoding** on the media server: a movie this player is waiting for,
    while the media server is reachable.
-5. Otherwise the poster slideshow. Movies stopped partway have a red
+4. Otherwise the poster slideshow. Movies stopped partway have a red
    progress bar along the bottom of the poster.
 
 The activity screens refresh their progress with each slideshow tick.
@@ -379,9 +377,9 @@ The home server's name (default `http://magicboxie.lan`) only resolves on the
 Mitera network. The device tests whether it resolves every 15 seconds, so a
 sync starts soon after joining Mitera (by Wi-Fi or Ethernet) and nothing is
 attempted elsewhere. Once it resolves, the device checks in every minute and
-downloads movies it does not have yet, one at a time, while nothing is
-playing. Downloads take priority over transcoding: a running transcode stops
-when a download starts and resumes afterwards.
+downloads movies it does not have yet, one at a time. The player does no
+transcoding of its own; the media server makes each 480p copy. Downloads run
+during playback too, capped at 1 MB/s.
 
 The server login is stored on the device in
 `/var/lib/magicboxie/home-server.env` (mode `600`, outside Git), as

@@ -41,16 +41,12 @@ _MAX_RELEASED = 256
 # portal": Apple a "Success" page, Android/Chrome an empty 204, Windows a
 # fixed string.
 # How often the web page should ask for status: the device tells it, so the
-# page backs off whenever the device is busy (a transcode is CPU-heavy, and
-# playback needs every cycle it can get).
+# page backs off while a movie plays (playback needs every cycle it can get).
 _POLL_SECONDS_IDLE = 3
 _POLL_SECONDS_PLAYING = 6
-_POLL_SECONDS_TRANSCODING = 10
 
 
 def _poll_seconds(controller: PlaybackController, playing: bool) -> int:
-    if controller.currently_transcoding_movie_id is not None:
-        return _POLL_SECONDS_TRANSCODING
     return _POLL_SECONDS_PLAYING if playing else _POLL_SECONDS_IDLE
 
 
@@ -161,11 +157,9 @@ def _movie_payload(controller: PlaybackController, movie: Movie) -> dict:
         "duration_seconds": movie.duration_seconds,
         "description": None,
         "year": None,
-        # Whether TranscodeService still needs to (re-)encode this movie -
-        # lets the app show a "not yet optimized for this device" badge
-        # distinct from the transcode_status characteristic's "actively
-        # transcoding right now" signal.
-        "needs_transcoding": not controller.library.transcode_path_for(movie.id).exists(),
+        # Nothing transcodes on the device any more (the media server makes
+        # the 480p copy); the field stays so existing apps keep working.
+        "needs_transcoding": False,
         # Where playback would resume (0 = never played, or played to the
         # end) - the page draws a progress bar under movies watched partway.
         "position_seconds": controller.saved_position(movie.id),
@@ -348,7 +342,8 @@ async def _get_status(request: web.Request) -> web.Response:
         "position_seconds": state.position_seconds,
         "syncing_movie_title": controller.currently_syncing_movie_title,
         "update_status": controller.update_status,
-        "transcoding_movie_id": controller.currently_transcoding_movie_id,
+        "thermal_note": controller.thermal_note,
+        "transcoding_movie_id": None,  # kept for existing apps; see needs_transcoding
         "poll_seconds": _poll_seconds(controller, state.status.name.lower() == "playing"),
         "cpu_temperature_celsius": cpu_temperature_celsius(),
         "under_voltage": throttle.under_voltage if throttle else None,
@@ -359,8 +354,7 @@ async def _get_status(request: web.Request) -> web.Response:
 
 def _activity_payload(controller: PlaybackController) -> dict:
     """What the loading icon's panel shows: the download in flight and the
-    ones behind it, the transcode in flight and the movies still waiting to
-    be optimized, and what the home server is still preparing."""
+    ones behind it, and what the home server is still preparing."""
     activity = controller.sync_activity
     downloading = None
     if controller.currently_syncing_movie_title:
@@ -369,27 +363,6 @@ def _activity_payload(controller: PlaybackController) -> dict:
             "bytes_done": activity.bytes_done if activity else None,
             "bytes_total": activity.bytes_total if activity else None,
         }
-
-    transcoding_id = controller.currently_transcoding_movie_id
-    transcoding = None
-    transcode_queue = []
-    # Gave up on until the player restarts; not waiting, so kept apart.
-    transcode_failed = []
-    for movie in controller.movies:
-        if movie.id == transcoding_id:
-            position = controller.transcode_position_seconds
-            duration = movie.duration_seconds
-            transcoding = {
-                "movie_id": movie.id,
-                "title": movie.title,
-                "position_seconds": position,
-                "duration_seconds": duration,
-                "percent": min(100.0, round(position / duration * 100, 1)) if position is not None and duration else None,
-            }
-        elif movie.id in controller.transcode_failed_movie_ids:
-            transcode_failed.append({"id": movie.id, "title": movie.title})
-        elif not controller.library.transcode_path_for(movie.id).exists():
-            transcode_queue.append({"id": movie.id, "title": movie.title})
 
     home_server = None
     if activity is not None:
@@ -401,11 +374,8 @@ def _activity_payload(controller: PlaybackController) -> dict:
     return {
         "downloading": downloading,
         "download_queue": list(activity.queued) if activity else [],
-        "transcoding": transcoding,
-        "transcode_queue": transcode_queue,
-        "transcode_failed": transcode_failed,
         "home_server": home_server,
-        # Only transcoding waits while a movie plays; downloads carry on.
+        # Downloads carry on while a movie plays, slowed down.
         "paused_for_playback": not controller.is_idle,
     }
 

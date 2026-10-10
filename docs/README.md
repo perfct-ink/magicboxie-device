@@ -198,8 +198,9 @@ cp "My Movie.mp4" /content/
 curl -X POST http://localhost:8000/api/rescan
 ```
 
-The service generates thumbnails and creates device-optimized transcodes in
-the background while playback is idle. Original movies remain in `/content`.
+The service generates thumbnails in the background while playback is idle.
+It does not transcode: the media server makes the 480p copy the player
+downloads into `/content`.
 
 ## Update the device
 
@@ -256,7 +257,7 @@ Startup and recovery:
 
 - Startup lists movies without running ffprobe or ffmpeg. Durations are cached by file size and modification time; missing metadata and thumbnails are filled in after playback stops.
 - Downloads, uploads, thumbnails, metadata, and playback state use temporary files and atomic replacement. Completed writes are synced to disk. Startup removes abandoned partial files.
-- Playback failures quarantine the rejected file with a `.corrupt` suffix. A failed optimized copy falls back to the original; a failed original stops playback and returns to the idle screen. Quarantined files remain available for inspection.
+- Playback failures quarantine the rejected file with a `.corrupt` suffix. A failed copy transcoded here by an older release falls back to the movie's own file; a failed movie file stops playback and returns to the idle screen. Quarantined files remain available for inspection.
 - Each movie keeps its own resume position, checkpointed every five seconds and saved immediately on Stop and movie changes. Natural completion clears that movie's position and returns to the idle screen; nothing plays next automatically. Startup resumes only the saved movie, never a random one, and honors input received during startup.
 - HTTP `update_status` and BLE characteristic `...000000000009` report a UTF-8 update message (empty BLE value / null HTTP field when inactive). Software updates wait for the current movie to finish and suppress startup resume until installation ends. The iOS app displays this over either transport.
 - The updater records the successfully installed revision separately from Git HEAD, so an interrupted installation is retried. Its live status belongs to the updater process and expires rather than leaving a permanent updating indication after a crash.
@@ -265,5 +266,6 @@ Background scheduling:
 
 - Player/HDMI initialization overlaps partial-file recovery and the fast library scan. Initial screen rendering runs alongside control-service startup.
 - Screen rendering, durable playback saves, upload/download writes, metadata writes, and completed-file publication run in worker threads. Writes still finish durably before the corresponding operation succeeds; cancellation waits for an active disk write before cleanup.
-- Home-server registration continues during playback. Large downloads and transcoding remain idle-only to protect playback on the Pi Zero's single core.
+- Home-server registration continues during playback. Downloads continue during playback but are capped at 1 MB/s to protect the Pi Zero's single core. Library scans of new files wait until playback stops. Priority: playback, downloads, slideshow.
+- Every minute the device checks its temperature. At 80 °C or above a playing movie is paused and a "too hot" note shows on the web page and idle screen; the note clears below 70 °C. Playback is never resumed automatically.
 - Pending background tasks are cancelled and joined on shutdown. A completed background screen render cannot replace a movie selected while it was rendering.

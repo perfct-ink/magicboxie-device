@@ -34,8 +34,7 @@ logger = logging.getLogger(__name__)
 _REQUEST_TIMEOUT_SECONDS = 10
 _DOWNLOAD_CHUNK_BYTES = 1024 * 1024
 # While a movie plays, downloads are capped to this rate so they leave the
-# CPU, disk and Wi-Fi to playback (priority: playback, downloads, transcoding,
-# slideshow). Idle, they run flat out.
+# CPU, disk and Wi-Fi to playback (priority: playback, then downloads). Idle, they run flat out.
 _PLAYING_DOWNLOAD_BYTES_PER_SECOND = 1024 * 1024
 _READY_STATUS = "ready"
 _USER_ID = "1"  # MagicBoxie-web has one shared login, not per-user accounts
@@ -44,7 +43,7 @@ _TICKS_PER_SECOND = 10_000_000  # Jellyfin's RunTimeTicks unit is 100ns
 # (MagicBoxiePlayerStatus, served from /Videos/{id}/player), so the Pi
 # doesn't have to re-encode it. Until it's "ready" the movie waits; if the
 # server couldn't make one ("error"), or is too old to say (no field at all),
-# the full-size file is downloaded and optimized here as before.
+# the full-size file is downloaded and played as it is.
 _PLAYER_COPY_READY = "ready"
 _PLAYER_COPY_FAILED = "error"
 
@@ -90,7 +89,7 @@ class HomeServerSync:
         # until idle so it does not compete with video decoding.
         self._is_idle = is_idle
         # True from the moment there are movies to download until the check-in
-        # ends, so transcoding (CPU- and disk-heavy) yields to the download.
+        # ends (shown on the activity card).
         self._on_busy = on_busy or (lambda _busy: None)
         # Movies downloaded in an earlier check-in whose library.scan() (and
         # metadata save) got deferred because playback started before this
@@ -299,10 +298,6 @@ class HomeServerSync:
         )
         if local_movie is None:
             return
-        if self._is_player_copy(remote_movie):
-            # Already encoded for this device: use it as the optimized copy
-            # so TranscodeService doesn't re-encode it.
-            self._library.adopt_as_optimized(local_movie.id)
         self._library.save_metadata(
             local_movie.id,
             title=remote_movie["Name"],

@@ -9,9 +9,8 @@ device directly over WiFi via mDNS and uses that for those. "http" mode
 (dev/testing - no Bluetooth required, e.g. no BlueZ on Docker Desktop/macOS)
 runs the HTTP service and mDNS advertisement alone, without BLE.
 
-Also runs a background transcode worker (services/transcode_service.py) that
-re-encodes movies, one at a time, to something this device's weak CPU can
-actually decode smoothly - only while nothing is playing.
+Movies are not transcoded on this device: the media server makes the 480p
+copy this device downloads (see services/home_sync_service.py).
 """
 from __future__ import annotations
 
@@ -129,8 +128,8 @@ async def _run() -> None:
             _run_mdns(stop_event),
             _run_library_scan(controller, stop_event, startup_decided, prepared=True),
             _run_playback(controller, stop_event),
-            _run_transcode(controller, stop_event),
             _run_idle_dim(controller, stop_event),
+            _run_thermal(controller, stop_event),
             _run_slideshow(controller, stop_event, startup_decided),
         ]
         if TRANSPORT != "http":
@@ -270,17 +269,6 @@ async def _run_playback(controller: PlaybackController, stop_event: asyncio.Even
         await sleep_unless_stopped(stop_event, 1)
 
 
-async def _run_transcode(controller: PlaybackController, stop_event: asyncio.Event) -> None:
-    """Re-encodes movies in the background, one at a time, to something this
-    device's weak CPU can decode smoothly - see services/transcode_service.py
-    for why and the encode settings. Only runs while idle (checked
-    internally against controller.is_idle), so it never competes with
-    playback decode for the same core."""
-    from .services.transcode_service import TranscodeService
-
-    await TranscodeService(controller).run(stop_event)
-
-
 async def _run_slideshow(controller: PlaybackController, stop_event: asyncio.Event,
                          startup_decided: asyncio.Event) -> None:
     """On the 720x480 TV output the idle screen shows one movie at a time;
@@ -300,6 +288,13 @@ async def _run_idle_dim(controller: PlaybackController, stop_event: asyncio.Even
     from .services.idle_dim_service import IdleDimService
 
     await IdleDimService(controller).run(stop_event)
+
+
+async def _run_thermal(controller: PlaybackController, stop_event: asyncio.Event) -> None:
+    """Pauses playback when the device overheats - see services/thermal_service.py."""
+    from .services.thermal_service import ThermalService
+
+    await ThermalService(controller).run(stop_event)
 
 
 async def _run_status_message(controller: PlaybackController, stop_event: asyncio.Event,

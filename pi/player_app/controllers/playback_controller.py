@@ -54,24 +54,13 @@ class PlaybackController:
         # Which movie the SD idle screen's slideshow is on (see idle_screen.py).
         self.slide_index = 0
 
-        # Set/cleared by TranscodeService, read by ble_service.py's status
-        # poll loop to notify the app - a shared hub between the two rather
-        # than a direct dependency between them, mirroring how is_idle
-        # already works in the other direction (TranscodeService reads it).
-        self.currently_transcoding_movie_id: Optional[int] = None
-        # How far into that movie the encode has got, from ffmpeg -progress.
-        self.transcode_position_seconds: Optional[float] = None
-        # Movies TranscodeService gave up on (until restart); the idle
-        # screen doesn't wait on them.
-        self.transcode_failed_movie_ids: set = set()
         # Set/cleared by HomeServerSync, read by web_service.py's /api/status
-        # - same hub pattern as currently_transcoding_movie_id above. A
-        # title, not an id: the movie doesn't have a local id yet while
+        # A title, not an id: the movie doesn't have a local id yet while
         # it's still downloading (library._stable_id only ever runs against
         # files that already exist on disk).
         self.currently_syncing_movie_title: Optional[str] = None
         # True while the home server has movies to download and this device
-        # is fetching them - TranscodeService yields to it: downloads first.
+        # is fetching them.
         self.sync_busy: bool = False
         # HomeServerSync's SyncActivity (queue, bytes, home server's own
         # transcodes), set by main.py; None when home sync isn't running.
@@ -82,6 +71,8 @@ class PlaybackController:
         # Startup/update progress text (see update_status.read_message),
         # kept fresh by main._run_status_message and drawn on the idle screen.
         self.status_message: Optional[str] = None
+        # Set by ThermalService while the device is too hot (playback paused).
+        self.thermal_note: Optional[str] = None
         # Updated on every command (remote or local) - IdleDimService reads
         # this to know how long it's been since anything happened, so it
         # knows when to dim the idle screen. monotonic(), not wall-clock
@@ -108,6 +99,8 @@ class PlaybackController:
         is only redrawn for it) when the step or the movie changes."""
         if self.status_message:
             return self.status_message
+        if self.thermal_note:
+            return self.thermal_note
         activity = self.idle_activity
         if activity is None:
             return None
@@ -117,11 +110,10 @@ class PlaybackController:
     def idle_activity(self) -> Optional[IdleActivity]:
         """What the idle screen shows in place of the slideshow, in priority
         order: a software update being installed (the player restarts when
-        it's done), a download from the media server, a transcode here (only
-        happens when the media server has nothing for this device, e.g. with
-        no internet), then the media server's own transcode of a movie this
-        device is waiting for, then any of those still waiting to start.
-        None once everything is downloaded and transcoded: the slideshow."""
+        it's done), a download from the media server, then the media server's
+        own transcode of a movie this device is waiting for, then downloads
+        still waiting to start. None once everything is downloaded: the
+        slideshow."""
         if self.is_updating:
             return IdleActivity("Updating", "Device software", None,
                                 "MagicBoxie restarts when it's done", color=_UPDATE_COLOR)
@@ -136,19 +128,6 @@ class PlaybackController:
             return IdleActivity("Downloading", title, percent,
                                 f"{queued} more to download" if queued else None,
                                 color=_DOWNLOAD_COLOR)
-
-        movie_id = self.currently_transcoding_movie_id
-        if movie_id is not None:
-            movie = next((m for m in self.movies if m.id == movie_id), None)
-            percent = None
-            position = self.transcode_position_seconds
-            if movie and movie.duration_seconds and position is not None:
-                percent = min(100, int(position * 100 // movie.duration_seconds))
-            waiting = sum(1 for m in self.movies
-                          if m.id != movie_id and not self.library.transcode_path_for(m.id).exists())
-            return IdleActivity("Transcoding", movie.title if movie else "a movie", percent,
-                                f"{waiting} more to transcode" if waiting else None,
-                                movie_id=movie_id, color=_TRANSCODE_COLOR)
 
         if activity and activity.reachable and activity.preparing:
             preparing = activity.preparing
@@ -166,22 +145,13 @@ class PlaybackController:
             )
 
         # Work that's waiting rather than running - downloads between
-        # check-ins, or this device's transcode paused while the media
-        # server has movies for it - still isn't "everything done", so it
-        # keeps the card up instead of dropping back to the slideshow.
+        # check-ins - still isn't "everything done", so it keeps the card up
+        # instead of dropping back to the slideshow.
         if activity and activity.reachable and activity.queued:
             others = len(activity.queued) - 1
             return IdleActivity("Downloading", activity.queued[0], None,
                                 "Waiting to start" + (f", {others} more after it" if others else ""),
                                 color=_DOWNLOAD_COLOR)
-        waiting = [m for m in self.movies
-                   if m.id not in self.transcode_failed_movie_ids
-                   and not self.library.transcode_path_for(m.id).exists()]
-        if waiting:
-            others = len(waiting) - 1
-            return IdleActivity("Transcoding", waiting[0].title, None,
-                                "Waiting to start" + (f", {others} more after it" if others else ""),
-                                movie_id=waiting[0].id, color=_TRANSCODE_COLOR)
         return None
 
     @property
@@ -211,10 +181,9 @@ class PlaybackController:
 
     @property
     def is_idle(self) -> bool:
-        """Whether anything is currently selected to play - checked by
-        TranscodeService before starting (or continuing) a background
-        transcode, since that's CPU-intensive enough to compete directly
-        with playback decode on this device's single core."""
+        """Whether anything is currently selected to play - background work
+        (library scans, the idle screen) waits for this, and downloads slow
+        down, so they don't compete with playback decode on the single core."""
         return self._current_movie_id is None
 
     async def handle_command(self, cmd: Command) -> None:

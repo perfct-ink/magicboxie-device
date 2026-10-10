@@ -421,7 +421,7 @@ def _registered(player_status):
     return {"items": [movie]}
 
 
-def test_check_in_downloads_the_home_servers_480p_copy_and_skips_transcoding_it(tmp_path):
+def test_check_in_downloads_the_home_servers_480p_copy(tmp_path):
     movies_dir = tmp_path / "movies"
     movies_dir.mkdir()
     library = MovieLibrary(movies_dir, thumbnail_dir=tmp_path / "thumbnails", transcode_dir=tmp_path / "transcoded")
@@ -436,10 +436,7 @@ def test_check_in_downloads_the_home_servers_480p_copy_and_skips_transcoding_it(
 
     # Always an .mp4, whatever the original was.
     assert (movies_dir / "Gamma.mp4").read_bytes() == b"480p-bytes"
-    movie = library.movies[0]
-    # Adopted as the optimized copy, so TranscodeService has nothing to do.
-    assert library.transcode_path_for(movie.id).read_bytes() == b"480p-bytes"
-    assert library.playable_path_for(movie.id) == library.transcode_path_for(movie.id)
+    assert library.playable_path_for(library.movies[0].id) == movies_dir / "Gamma.mp4"
 
 
 def test_check_in_waits_for_the_home_servers_480p_copy(tmp_path):

@@ -31,26 +31,9 @@ def test_get_movies():
 
     data = asyncio.run(scenario())
     assert data == [
-        {"id": 0, "title": "A", "duration_seconds": 100, "description": None, "year": None, "needs_transcoding": True, "position_seconds": 0},
-        {"id": 1, "title": "B", "duration_seconds": 200, "description": None, "year": None, "needs_transcoding": True, "position_seconds": 0},
+        {"id": 0, "title": "A", "duration_seconds": 100, "description": None, "year": None, "needs_transcoding": False, "position_seconds": 0},
+        {"id": 1, "title": "B", "duration_seconds": 200, "description": None, "year": None, "needs_transcoding": False, "position_seconds": 0},
     ]
-
-
-def test_get_movies_reports_needs_transcoding_false_once_a_transcoded_file_exists(tmp_path):
-    async def scenario():
-        library = FakeLibrary(transcode_dir=tmp_path)
-        (tmp_path / "0.mp4").write_bytes(b"fake transcoded data")
-        client, _ = await _make_client(library)
-        try:
-            resp = await client.get("/api/movies")
-            return await resp.json()
-        finally:
-            await client.close()
-
-    data = asyncio.run(scenario())
-    by_id = {movie["id"]: movie for movie in data}
-    assert by_id[0]["needs_transcoding"] is False
-    assert by_id[1]["needs_transcoding"] is True
 
 
 def test_get_movies_reports_where_a_previously_played_movie_left_off():
@@ -310,13 +293,13 @@ def test_post_metadata_overrides_fields_in_movie_list():
         "duration_seconds": 100,
         "description": "A movie.",
         "year": 1999,
-        "needs_transcoding": True,
+        "needs_transcoding": False,
         "position_seconds": 0,
     }
     assert post_body == expected
     assert movies[0] == expected
     assert movies[1] == {
-        "id": 1, "title": "B", "duration_seconds": 200, "description": None, "year": None, "needs_transcoding": True,
+        "id": 1, "title": "B", "duration_seconds": 200, "description": None, "year": None, "needs_transcoding": False,
         "position_seconds": 0,
     }
 
@@ -796,11 +779,11 @@ def test_shutdown_reports_success_and_failure():
     assert status == 500 and body["error"] == "not permitted"
 
 
-def test_status_reports_the_single_movie_being_transcoded():
-    async def scenario():
+def test_status_tells_the_page_how_often_to_poll_and_any_thermal_note():
+    async def scenario(thermal_note):
         client, controller = await _make_client()
         try:
-            controller.currently_transcoding_movie_id = 1
+            controller.thermal_note = thermal_note
             with patch("web.web_service.get_throttle_status", new=AsyncMock(return_value=None)), \
                     patch("web.web_service.internet_reachable", new=AsyncMock(return_value=True)):
                 response = await client.get("/api/status")
@@ -808,23 +791,9 @@ def test_status_reports_the_single_movie_being_transcoded():
         finally:
             await client.close()
 
-    assert asyncio.run(scenario())["transcoding_movie_id"] == 1
-
-
-def test_status_tells_the_page_how_often_to_poll():
-    async def scenario(transcoding_id):
-        client, controller = await _make_client()
-        try:
-            controller.currently_transcoding_movie_id = transcoding_id
-            with patch("web.web_service.get_throttle_status", new=AsyncMock(return_value=None)), \
-                    patch("web.web_service.internet_reachable", new=AsyncMock(return_value=True)):
-                response = await client.get("/api/status")
-                return (await response.json())["poll_seconds"]
-        finally:
-            await client.close()
-
-    assert asyncio.run(scenario(None)) == 3      # idle
-    assert asyncio.run(scenario(1)) == 10        # transcoding: back off
+    data = asyncio.run(scenario(None))
+    assert data["poll_seconds"] == 3 and data["thermal_note"] is None
+    assert asyncio.run(scenario("Too hot"))["thermal_note"] == "Too hot"
 
 
 def test_wifi_search_reports_success_and_failure():
@@ -861,15 +830,13 @@ def test_wifi_networks_can_be_saved_and_listed_without_passwords(tmp_path):
     assert asyncio.run(scenario()) == (400, 400, 200, {"networks": ["My iPhone"]})
 
 
-def test_activity_reports_downloads_transcodes_and_queues(tmp_path):
+def test_activity_reports_downloads_and_the_home_servers_progress(tmp_path):
     from player_app.services.home_sync_service import SyncActivity
 
     async def scenario():
         library = FakeLibrary(transcode_dir=tmp_path)
         client, controller = await _make_client(library)
         controller.currently_syncing_movie_title = "Gamma"
-        controller.currently_transcoding_movie_id = 0
-        controller.transcode_position_seconds = 25.0
         controller.sync_activity = SyncActivity(
             queued=["Delta", "Epsilon"], bytes_done=50, bytes_total=200,
             preparing=[{"title": "Zeta", "status": "transcoding", "progress_percent": 40.0}],
@@ -885,10 +852,6 @@ def test_activity_reports_downloads_transcodes_and_queues(tmp_path):
     data = asyncio.run(scenario())
     assert data["downloading"] == {"title": "Gamma", "bytes_done": 50, "bytes_total": 200}
     assert data["download_queue"] == ["Delta", "Epsilon"]
-    assert data["transcoding"] == {
-        "movie_id": 0, "title": "A", "position_seconds": 25.0, "duration_seconds": 100, "percent": 25.0,
-    }
-    assert data["transcode_queue"] == [{"id": 1, "title": "B"}]
     assert data["home_server"]["preparing"] == [{"title": "Zeta", "status": "transcoding", "progress_percent": 40.0}]
     assert data["paused_for_playback"] is False
 
@@ -906,6 +869,6 @@ def test_activity_is_empty_when_nothing_is_happening(tmp_path):
 
     data = asyncio.run(scenario())
     assert data == {
-        "downloading": None, "download_queue": [], "transcoding": None, "transcode_queue": [], "transcode_failed": [],
+        "downloading": None, "download_queue": [],
         "home_server": None, "paused_for_playback": False,
     }

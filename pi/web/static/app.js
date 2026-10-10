@@ -42,9 +42,6 @@ function render() {
     const cap = document.createElement('div'); cap.className = 'cap'; cap.textContent = m.title;
     if (meta(m)) {const s = document.createElement('small'); s.textContent = meta(m); cap.append(s);}
     card.append(p, cap);
-    // Only one movie is transcoded at a time; the rest of the backlog is just queued.
-    const badge = m.id === state.transcoding_movie_id ? 'Optimizing…' : m.needs_transcoding ? 'Queued' : '';
-    if (badge) {const b = document.createElement('span'); b.className = 'badge'; b.textContent = badge; card.append(b);}
     // Watched partway before: a progress bar along the bottom of the poster
     // (live for the movie playing now, saved position for the rest).
     const pos = m.id === state.movie_id && state.status !== 'stopped' ? state.position_seconds : m.position_seconds;
@@ -104,22 +101,19 @@ function startTicker(m) {
 }
 async function status() {
   try {
-    const previous = state.transcoding_movie_id, previousSync = state.syncing_movie_title, previousMovie = state.status === 'stopped' ? null : state.movie_id;
-    state = await api('/api/status'); $('conn').textContent = 'Connected';
+    const previous = state.syncing_movie_title, previousSync = state.syncing_movie_title, previousMovie = state.status === 'stopped' ? null : state.movie_id;
+    state = await api('/api/status'); $('conn').textContent = state.thermal_note || 'Connected';
     stopTicker();
-    // A transcode or download started or finished: reload so "Queued" badges
-    // and the list are current. Same when the movie playing changes or
-    // stops, so its saved position (the progress bar under it) is current.
+    // A download started or finished: reload so the list is current. Same
+    // when the movie playing changes or stops, so its saved position (the progress bar under it) is current.
     const playingMovie = state.status === 'stopped' ? null : state.movie_id;
-    if (previous !== undefined && (previous !== state.transcoding_movie_id || previousSync !== state.syncing_movie_title
+    if (previous !== undefined && (previousSync !== state.syncing_movie_title
         || previousMovie !== playingMovie)) await load();
     const m = movies.find(x => x.id === state.movie_id), active = m && state.status !== 'stopped';
-    // Top-right spinner while the device downloads or transcodes; tapping it
-    // opens the activity panel (downloads, transcodes and their queues).
-    const optimizing = movies.find(x => x.id === state.transcoding_movie_id);
-    const busyLabel = state.syncing_movie_title ? 'Downloading ' + state.syncing_movie_title
-      : optimizing ? 'Optimizing ' + optimizing.title : 'Optimizing a movie';
-    $('busy').classList.toggle('hidden', state.transcoding_movie_id == null && !state.syncing_movie_title);
+    // Top-right spinner while the device downloads; tapping it opens the
+    // activity panel (downloads, their queue and the home server's progress).
+    const busyLabel = 'Downloading ' + (state.syncing_movie_title || '');
+    $('busy').classList.toggle('hidden', !state.syncing_movie_title);
     $('busy').title = busyLabel; $('busy').setAttribute('aria-label', busyLabel);
     $('bar').classList.toggle('hidden', !active); $('hero').classList.toggle('hidden', !active);
     if (active) {
@@ -139,7 +133,7 @@ async function load() {
 // Poll gently: not at all while the tab is hidden, and less often while a
 // movie plays, so the page never competes with playback on the device.
 function pollStatus() {
-  // The device says how often to ask: slower while it plays or transcodes.
+  // The device says how often to ask: slower while it plays.
   const delay = Math.min(30, Math.max(2, state.poll_seconds || 3)) * 1000;
   setTimeout(async () => {
     if (!document.hidden) await status();
@@ -345,7 +339,7 @@ function renderActivity(a) {
   const body = $('activityBody'); body.replaceChildren();
   if (a.paused_for_playback) {
     const p = document.createElement('p'); p.className = 'meta';
-    p.textContent = 'Optimizing is paused while a movie plays and picks up again when it stops. Downloads carry on, slowed so playback stays smooth.'; body.append(p);
+    p.textContent = 'A movie is playing: downloads carry on, slowed so playback stays smooth.'; body.append(p);
   }
   const d = a.downloading;
   const dlPct = d && d.bytes_total ? d.bytes_done / d.bytes_total * 100 : null;
@@ -353,12 +347,6 @@ function renderActivity(a) {
     : d.bytes_done ? mb(d.bytes_done) : 'starting') : '';
   activityGroup(body, 'Downloading from home server', d ? [activityItem(d.title, dlDetail, dlPct ?? 0)] : [], 'Nothing downloading');
   activityGroup(body, 'Download queue', a.download_queue.map(t => activityItem(t, 'waiting')));
-  const t = a.transcoding;
-  const tDetail = t ? (t.percent != null ? Math.floor(t.percent) + '% · ' + fmt(t.position_seconds) + ' of ' + fmt(t.duration_seconds)
-    : t.position_seconds ? fmt(t.position_seconds) + ' done' : 'starting') : '';
-  activityGroup(body, 'Optimizing on this player', t ? [activityItem(t.title, tDetail, t.percent ?? 0)] : [], 'Nothing optimizing');
-  activityGroup(body, 'Optimize queue', a.transcode_queue.map(m => activityItem(m.title, 'waiting')));
-  activityGroup(body, "Couldn't optimize", (a.transcode_failed || []).map(m => activityItem(m.title, 'failed')));
   const home = a.home_server;
   if (home) {
     const rows = home.preparing.map(m => activityItem(m.title,
@@ -377,7 +365,7 @@ function openActivity() {
   clearInterval(settingsTimer);
   const panel = $('panel'); panel.replaceChildren();
   const body = document.createElement('div'); body.className = 'body';
-  const h = document.createElement('h3'); h.textContent = 'Downloads and optimizing';
+  const h = document.createElement('h3'); h.textContent = 'Downloads';
   const details = document.createElement('div'); details.id = 'activityBody'; details.textContent = 'Loading…';
   const row = document.createElement('div'); row.className = 'row';
   const close = document.createElement('button'); close.className = 'btn grey'; close.textContent = 'Close';
