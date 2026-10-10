@@ -468,3 +468,34 @@ def test_check_in_downloads_the_full_file_when_the_480p_copy_failed(tmp_path):
         asyncio.run(sync.check_in())
 
     assert (tmp_path / "movies" / "Gamma.mkv").read_bytes() == b"full-size-bytes"
+
+
+def test_download_is_throttled_only_while_playing(tmp_path, monkeypatch):
+    from player_app.services import home_sync_service
+    monkeypatch.setattr(home_sync_service, "_DOWNLOAD_CHUNK_BYTES", 10)
+    monkeypatch.setattr(home_sync_service, "_PLAYING_DOWNLOAD_BYTES_PER_SECOND", 100)  # 0.1s per 10-byte chunk
+    sleeps = []
+    real_sleep = asyncio.sleep
+
+    async def fake_sleep(seconds):
+        sleeps.append(seconds)
+        await real_sleep(0)
+
+    monkeypatch.setattr(home_sync_service.asyncio, "sleep", fake_sleep)
+
+    def download(idle):
+        root = tmp_path / ("idle" if idle else "playing")
+        root.mkdir()
+        library = _library(root)
+        sync = HomeServerSync(library, BASE_URL, "secret", is_idle=lambda: idle)
+        with aioresponses() as mocked:
+            mocked.post(f"{BASE_URL}/Users/AuthenticateByName", payload={"AccessToken": "t"}, repeat=True)
+            mocked.get(f"{BASE_URL}/Users/1/Items?IncludeItemTypes=Movie&Recursive=true", payload={"Items": [
+                {"Id": "1", "Name": "Alpha", "MagicBoxieOriginalFilename": "alpha.mp4", "MagicBoxieStatus": "ready"}]})
+            mocked.get(f"{BASE_URL}/Videos/1/stream?static=true", body=b"x" * 30)
+            asyncio.run(sync.check_in())
+
+    download(idle=True)
+    assert sleeps == []
+    download(idle=False)
+    assert len(sleeps) == 3 and all(0 < s <= 0.1 for s in sleeps)

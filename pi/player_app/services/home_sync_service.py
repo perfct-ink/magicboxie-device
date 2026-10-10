@@ -16,6 +16,7 @@ MovieLibrary.scan() grabs a frame from it with ffmpeg like any other movie.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import time
@@ -32,6 +33,10 @@ logger = logging.getLogger(__name__)
 
 _REQUEST_TIMEOUT_SECONDS = 10
 _DOWNLOAD_CHUNK_BYTES = 1024 * 1024
+# While a movie plays, downloads are capped to this rate so they leave the
+# CPU, disk and Wi-Fi to playback (priority: playback, downloads, transcoding,
+# slideshow). Idle, they run flat out.
+_PLAYING_DOWNLOAD_BYTES_PER_SECOND = 1024 * 1024
 _READY_STATUS = "ready"
 _USER_ID = "1"  # MagicBoxie-web has one shared login, not per-user accounts
 _TICKS_PER_SECOND = 10_000_000  # Jellyfin's RunTimeTicks unit is 100ns
@@ -259,9 +264,16 @@ class HomeServerSync:
                     return False
                 self.activity.bytes_done, self.activity.bytes_total = 0, resp.content_length
                 with temporary.open("wb") as f:
+                    chunk_started = time.monotonic()
                     async for chunk in resp.content.iter_chunked(_DOWNLOAD_CHUNK_BYTES):
                         await run_io(f.write, chunk)
                         self.activity.bytes_done += len(chunk)
+                        if not self._is_idle():
+                            # Playing: sleep off whatever of this chunk's
+                            # time budget the network didn't already use.
+                            budget = len(chunk) / _PLAYING_DOWNLOAD_BYTES_PER_SECOND
+                            await asyncio.sleep(max(0.0, budget - (time.monotonic() - chunk_started)))
+                        chunk_started = time.monotonic()
                 if temporary.stat().st_size == 0:
                     return False
                 await run_io(publish_file, temporary, dest_path)

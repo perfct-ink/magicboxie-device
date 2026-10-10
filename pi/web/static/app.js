@@ -345,7 +345,7 @@ function renderActivity(a) {
   const body = $('activityBody'); body.replaceChildren();
   if (a.paused_for_playback) {
     const p = document.createElement('p'); p.className = 'meta';
-    p.textContent = 'Optimizing is paused while a movie plays and picks up again when it stops. Downloads carry on.'; body.append(p);
+    p.textContent = 'Optimizing is paused while a movie plays and picks up again when it stops. Downloads carry on, slowed so playback stays smooth.'; body.append(p);
   }
   const d = a.downloading;
   const dlPct = d && d.bytes_total ? d.bytes_done / d.bytes_total * 100 : null;
