@@ -309,7 +309,10 @@ def _paste_backdrop(canvas: Image.Image, thumbnail_path: Path, height: int, brig
         return None
     # Blurring a tiny copy and scaling it up is far cheaper on the Pi Zero
     # than a real blur at full size, and looks the same.
-    backdrop = ImageOps.fit(poster, (32, 24)).resize((canvas.width, height), Image.BILINEAR)
+    # The tiny copy is cropped to the area's own shape, so scaling it up
+    # never stretches the picture.
+    small = (32, max(1, round(32 * height / canvas.width)))
+    backdrop = ImageOps.fit(poster, small).resize((canvas.width, height), Image.BILINEAR)
     canvas.paste(ImageEnhance.Brightness(backdrop).enhance(brightness), (0, 0))
     return poster
 

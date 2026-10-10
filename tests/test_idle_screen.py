@@ -211,3 +211,24 @@ def test_sd_activity_screen_replaces_the_slide(tmp_path):
 
     no_percent = _slide(tmp_path, library, activity=IdleActivity("Preparing", "Zeta"))
     assert no_percent.size == (640, 480)
+
+
+def test_sd_slide_backdrop_keeps_the_poster_aspect_ratio(tmp_path):
+    from unittest.mock import patch
+    from PIL import ImageOps
+    from player_app.views import idle_screen
+
+    poster = tmp_path / "0.jpg"
+    Image.new("RGB", (200, 300), (255, 255, 255)).save(poster)
+    sizes = []
+    real_fit = ImageOps.fit
+
+    def fit(image, size, *args, **kwargs):
+        sizes.append(size)
+        return real_fit(image, size, *args, **kwargs)
+
+    with patch.object(idle_screen.ImageOps, "fit", side_effect=fit):
+        _slide(tmp_path, FakeLibrary(thumbnail_paths={0: poster}))
+    (width, height), = sizes
+    # Same shape as the 640x368 poster area it is scaled up to.
+    assert abs(width / height - 640 / 368) < 0.1
