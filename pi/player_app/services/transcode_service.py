@@ -59,6 +59,8 @@ class TranscodeService:
         while not stop_event.is_set():
             movie = self._next_movie_needing_transcode() if self._may_run() else None
             if movie is None:
+                if self._may_run():
+                    await run_io(self._discard_originals)
                 await sleep_unless_stopped(stop_event, IDLE_POLL_INTERVAL_SECONDS)
                 continue
             try:
@@ -77,6 +79,17 @@ class TranscodeService:
         480p copies for this device): downloading takes priority over
         transcoding, and those movies won't need transcoding here at all."""
         return self._controller.is_idle and not self._controller.home_server_has_work
+
+    def _discard_originals(self) -> None:
+        """Frees the disk used by originals that have an optimized copy.
+        Swept whenever there is nothing left to transcode, which also catches
+        movies finished before this existed or while playback began."""
+        library = self._controller.library
+        for movie in list(library.movies):
+            if not self._may_run():
+                return
+            if library.transcode_path_for(movie.id).exists():
+                library.discard_original(movie.id)
 
     def _next_movie_needing_transcode(self) -> Optional[Movie]:
         for movie in self._controller.movies:

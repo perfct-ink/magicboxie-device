@@ -113,3 +113,41 @@ def test_movie_id_survives_a_collision_being_freed_up_by_another_file_going_away
 
     second_id_after = next(m for m in library.movies if m.title == "second").id
     assert second_id_after == second_id_before
+
+
+def test_discard_original_keeps_the_movie_as_its_optimized_mp4(tmp_path):
+    movies_dir = tmp_path / "movies"
+    movies_dir.mkdir()
+    (movies_dir / "Alpha.mkv").write_bytes(b"big-original")
+    library = MovieLibrary(movies_dir, thumbnail_dir=tmp_path / "thumbs", transcode_dir=tmp_path / "transcoded")
+    library.scan()
+    movie = library.movies[0]
+    assert library.discard_original(movie.id) is False  # nothing optimized yet
+
+    library.transcode_path_for(movie.id).parent.mkdir()
+    library.transcode_path_for(movie.id).write_bytes(b"small")
+    assert library.discard_original(movie.id) is True
+
+    assert not (movies_dir / "Alpha.mkv").exists()
+    assert (movies_dir / "Alpha.mp4").read_bytes() == b"small"
+    [after] = library.movies
+    assert (after.id, after.title) == (movie.id, "Alpha")
+    assert library.discard_original(movie.id) is False  # already done
+
+
+def test_deleting_a_movie_after_discarding_its_original_removes_everything(tmp_path):
+    movies_dir = tmp_path / "movies"
+    movies_dir.mkdir()
+    (movies_dir / "Alpha.mkv").write_bytes(b"big")
+    library = MovieLibrary(movies_dir, thumbnail_dir=tmp_path / "thumbs", transcode_dir=tmp_path / "transcoded")
+    library.scan()
+    movie_id = library.movies[0].id
+    library.transcode_path_for(movie_id).parent.mkdir()
+    library.transcode_path_for(movie_id).write_bytes(b"small")
+    library.discard_original(movie_id)
+
+    library.delete(movie_id)
+
+    assert library.movies == []
+    assert list(movies_dir.iterdir()) == []
+    assert not library.transcode_path_for(movie_id).exists()

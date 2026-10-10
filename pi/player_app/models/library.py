@@ -200,11 +200,54 @@ class MovieLibrary:
         except (OSError, KeyError) as exc:
             logger.info("Could not adopt movie %d as optimized (%s); it will be transcoded here", movie_id, exc)
 
+    def discard_original(self, movie_id: int) -> bool:
+        """Once a movie has its optimized copy, drops the original to free the
+        disk: the optimized file is hard-linked into the movies directory as
+        "<title>.mp4" (replacing the original, whatever its extension), so the
+        movie keeps its id, title and place in the library, and the one inode
+        is still the transcoded copy too. Returns True if it did so; False if
+        there was nothing to do or it could not (e.g. the two directories are
+        on different filesystems) - the original is then simply kept."""
+        with self._scan_lock:
+            original = self._paths.get(movie_id)
+            optimized = self.transcode_path_for(movie_id)
+            if original is None or not optimized.exists() or not original.exists():
+                return False
+            if original.samefile(optimized):
+                return False
+            target = original.with_suffix(".mp4")
+            if target != original and target.exists():
+                return False
+            staging = target.with_name("." + target.name + ".partial")
+            try:
+                staging.unlink(missing_ok=True)
+                os.link(optimized, staging)
+                os.replace(staging, target)
+                if target != original:
+                    original.unlink()
+            except OSError as exc:
+                logger.info("Could not discard original of movie %d (%s); keeping it", movie_id, exc)
+                staging.unlink(missing_ok=True)
+                return False
+            self._id_by_filename.pop(original.name, None)
+            self._id_by_filename[target.name] = movie_id
+            self._save_id_map()
+            logger.info("Discarded original %s; %s is the optimized copy", original.name, target.name)
+            self.scan()
+            return True
+
     def quarantine_failed_playback(self, movie_id: int) -> bool:
         """Preserve rejected media outside the library; retry originals after a bad encode."""
         with self._scan_lock:
             path = self.playable_path_for(movie_id)
             optimized = path == self.transcode_path_for(movie_id)
+            original = self._paths.get(movie_id)
+            if optimized and original is not None and original.exists() and original.samefile(path):
+                # The optimized copy is the movie's only file (its original
+                # was discarded): nothing left to retry from.
+                optimized = False
+                path = original
+                self.transcode_path_for(movie_id).unlink(missing_ok=True)
             try:
                 path.rename(path.with_name(f"{path.name}.{time.time_ns()}.corrupt"))
             except OSError:
